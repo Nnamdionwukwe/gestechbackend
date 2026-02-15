@@ -19,6 +19,18 @@ db.query("SELECT NOW()")
   .then(() => console.log("✓ PostgreSQL connected"))
   .catch((err) => console.error("✗ PostgreSQL connection error:", err));
 
+// AUTO-FIX: Add missing columns on startup
+db.query(
+  `
+  ALTER TABLE testimonials ADD COLUMN IF NOT EXISTS is_approved BOOLEAN DEFAULT true;
+  ALTER TABLE testimonials ADD COLUMN IF NOT EXISTS display_order INTEGER DEFAULT 0;
+  ALTER TABLE services ADD COLUMN IF NOT EXISTS display_order INTEGER DEFAULT 0;
+`,
+)
+  .then(() => console.log("✓ Database schema updated"))
+  .catch((err) => console.log("Schema update skipped:", err.message));
+
+// Rest of your code...
 // Health check endpoint
 app.get("/health", (req, res) => {
   res.json({
