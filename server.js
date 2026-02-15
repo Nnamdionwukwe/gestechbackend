@@ -7,21 +7,8 @@ const db = require("./src/config/database");
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// CORS configuration - FIXED
-app.use(
-  cors({
-    origin: [
-      "http://localhost:5173",
-      "http://localhost:3000",
-      "http://localhost:5000",
-      process.env.VITE_API_URL ||
-        "https://gestechbackend-production.up.railway.app",
-    ],
-    credentials: true,
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-  }),
-);
+// CORS configuration - SIMPLE
+app.use(cors());
 
 // Middleware
 app.use(express.json());
