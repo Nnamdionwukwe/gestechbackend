@@ -7,8 +7,20 @@ const db = require("./src/config/database");
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// CORS configuration - SIMPLE
-app.use(cors());
+// CORS configuration - Allow Vercel and all origins
+app.use(
+  cors({
+    origin: [
+      "http://localhost:5173",
+      "http://localhost:5001",
+      "https://gestecom.vercel.app",
+      "https://gestechbackend-production.up.railway.app",
+    ],
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  }),
+);
 
 // Middleware
 app.use(express.json());
