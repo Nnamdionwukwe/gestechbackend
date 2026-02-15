@@ -91,7 +91,8 @@ app.use((err, req, res, next) => {
 });
 
 // Start server
-app.listen(PORT, () => {
+// Start server - BIND TO 0.0.0.0 for Railway
+app.listen(PORT, "0.0.0.0", () => {
   console.log(`
 ╔════════════════════════════════════════╗
 ║   🚀 GesTech Backend Server Running   ║
