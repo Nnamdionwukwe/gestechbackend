@@ -2,7 +2,7 @@
 const db = require("../config/database");
 const { v4: uuidv4 } = require("uuid");
 
-// Get all services
+// Get all services (WITH VARIANTS)
 exports.getAllServices = async (req, res) => {
   try {
     const { category } = req.query;
@@ -23,9 +23,28 @@ exports.getAllServices = async (req, res) => {
 
     const services = await db.query(query, params);
 
+    // Get variants for each service
+    const servicesWithVariants = await Promise.all(
+      services.rows.map(async (service) => {
+        const variants = await db.query(
+          `SELECT id, name, description, price, duration, features, display_order
+           FROM service_variants
+           WHERE service_id = $1 AND is_active = true
+           ORDER BY display_order ASC`,
+          [service.id],
+        );
+
+        return {
+          ...service,
+          variants: variants.rows,
+          has_variants: variants.rows.length > 0,
+        };
+      }),
+    );
+
     res.json({
       success: true,
-      services: services.rows,
+      services: servicesWithVariants,
       categories: [
         "software-development",
         "mobile-app-development",
@@ -45,7 +64,7 @@ exports.getAllServices = async (req, res) => {
   }
 };
 
-// Get service by slug
+// Get service by slug (WITH VARIANTS)
 exports.getServiceBySlug = async (req, res) => {
   try {
     const { slug } = req.params;
@@ -62,6 +81,15 @@ exports.getServiceBySlug = async (req, res) => {
       });
     }
 
+    // Get variants for this service
+    const variants = await db.query(
+      `SELECT id, name, description, price, duration, features, display_order
+       FROM service_variants
+       WHERE service_id = $1 AND is_active = true
+       ORDER BY display_order ASC`,
+      [service.rows[0].id],
+    );
+
     // Get related projects
     const projects = await db.query(
       `SELECT * FROM portfolio_projects 
@@ -72,7 +100,7 @@ exports.getServiceBySlug = async (req, res) => {
       [service.rows[0].name],
     );
 
-    // Get testimonials (all for now since we don't have service relationships)
+    // Get testimonials
     const testimonials = await db.query(
       `SELECT * FROM testimonials
        WHERE is_approved = true
@@ -82,7 +110,11 @@ exports.getServiceBySlug = async (req, res) => {
 
     res.json({
       success: true,
-      service: service.rows[0],
+      service: {
+        ...service.rows[0],
+        variants: variants.rows,
+        has_variants: variants.rows.length > 0,
+      },
       projects: projects.rows,
       testimonials: testimonials.rows,
     });
@@ -91,6 +123,39 @@ exports.getServiceBySlug = async (req, res) => {
     res.status(500).json({
       success: false,
       error: "Failed to fetch service",
+    });
+  }
+};
+
+// Get single service variant
+exports.getServiceVariant = async (req, res) => {
+  try {
+    const { variantId } = req.params;
+
+    const variant = await db.query(
+      `SELECT sv.*, s.name as service_name, s.category, s.slug as service_slug
+       FROM service_variants sv
+       JOIN services s ON sv.service_id = s.id
+       WHERE sv.id = $1 AND sv.is_active = true AND s.is_active = true`,
+      [variantId],
+    );
+
+    if (variant.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: "Service variant not found",
+      });
+    }
+
+    res.json({
+      success: true,
+      variant: variant.rows[0],
+    });
+  } catch (error) {
+    console.error("Get service variant error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to fetch service variant",
     });
   }
 };
@@ -380,7 +445,7 @@ exports.subscribeNewsletter = async (req, res) => {
   }
 };
 
-// Get technologies - Placeholder since table doesn't exist
+// Get technologies
 exports.getTechnologies = async (req, res) => {
   try {
     // Return static tech stack for now
