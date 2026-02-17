@@ -6,76 +6,147 @@ class CartController {
    * Helper function to get formatted cart data
    */
   async getFormattedCartData(client, cartId) {
-    const cartResult = await client.query("SELECT * FROM carts WHERE id = $1", [
-      cartId,
-    ]);
+    try {
+      const cartResult = await client.query(
+        "SELECT * FROM carts WHERE id = $1",
+        [cartId],
+      );
 
-    const cart = cartResult.rows[0];
-
-    const itemsResult = await client.query(
-      `
-      SELECT 
-        ci.id, ci.quantity, ci.price, ci.item_type,
-        p.id as product_id, p.name as product_name, p.description as product_description, 
-        p.stock as product_stock, p.images as product_images,
-        sv.id as variant_id, sv.name as variant_name, sv.description as variant_description,
-        sv.duration, sv.features,
-        s.id as service_id, s.name as service_name, s.category as service_category
-      FROM cart_items ci
-      LEFT JOIN products p ON ci.product_id = p.id AND ci.item_type = 'product'
-      LEFT JOIN service_variants sv ON ci.service_variant_id = sv.id AND ci.item_type = 'service'
-      LEFT JOIN services s ON sv.service_id = s.id
-      WHERE ci.cart_id = $1
-    `,
-      [cartId],
-    );
-
-    const formattedItems = itemsResult.rows.map((item) => {
-      if (item.item_type === "product") {
-        return {
-          id: item.id,
-          type: "product",
-          product: {
-            id: item.product_id,
-            name: item.product_name,
-            description: item.product_description,
-            stock: item.product_stock,
-            images: item.product_images,
-          },
-          quantity: item.quantity,
-          price: parseFloat(item.price),
-        };
-      } else {
-        return {
-          id: item.id,
-          type: "service",
-          service: {
-            id: item.service_id,
-            name: item.service_name,
-            category: item.service_category,
-          },
-          variant: {
-            id: item.variant_id,
-            name: item.variant_name,
-            description: item.variant_description,
-            duration: item.duration,
-            features: item.features,
-          },
-          quantity: item.quantity,
-          price: parseFloat(item.price),
-        };
+      if (cartResult.rows.length === 0) {
+        throw new Error("Cart not found");
       }
-    });
 
-    return {
-      id: cart.id,
-      user_id: cart.user_id,
-      subtotal: parseFloat(cart.subtotal),
-      total: parseFloat(cart.total),
-      items: formattedItems,
-      created_at: cart.created_at,
-      updated_at: cart.updated_at,
-    };
+      const cart = cartResult.rows[0];
+
+      // Check if item_type column exists (indicates updated cart_items table)
+      const columnCheck = await client.query(`
+        SELECT EXISTS (
+          SELECT FROM information_schema.columns 
+          WHERE table_name = 'cart_items' 
+          AND column_name = 'item_type'
+        );
+      `);
+
+      const hasItemType = columnCheck.rows[0].exists;
+
+      let itemsResult;
+
+      if (hasItemType) {
+        // New schema with service variants support
+        const tableCheck = await client.query(`
+          SELECT EXISTS (
+            SELECT FROM information_schema.tables 
+            WHERE table_name = 'service_variants'
+          );
+        `);
+
+        const hasServiceVariants = tableCheck.rows[0].exists;
+
+        if (hasServiceVariants) {
+          // Full query with services
+          itemsResult = await client.query(
+            `
+            SELECT 
+              ci.id, ci.quantity, ci.price, ci.item_type,
+              p.id as product_id, p.name as product_name, p.description as product_description, 
+              p.stock as product_stock, p.images as product_images,
+              sv.id as variant_id, sv.name as variant_name, sv.description as variant_description,
+              sv.duration, sv.features,
+              s.id as service_id, s.name as service_name, s.category as service_category
+            FROM cart_items ci
+            LEFT JOIN products p ON ci.product_id = p.id AND ci.item_type = 'product'
+            LEFT JOIN service_variants sv ON ci.service_variant_id = sv.id AND ci.item_type = 'service'
+            LEFT JOIN services s ON sv.service_id = s.id
+            WHERE ci.cart_id = $1
+          `,
+            [cartId],
+          );
+        } else {
+          // Query without service variants
+          itemsResult = await client.query(
+            `
+            SELECT 
+              ci.id, ci.quantity, ci.price, ci.item_type,
+              p.id as product_id, p.name as product_name, p.description as product_description, 
+              p.stock as product_stock, p.images as product_images
+            FROM cart_items ci
+            LEFT JOIN products p ON ci.product_id = p.id
+            WHERE ci.cart_id = $1
+          `,
+            [cartId],
+          );
+        }
+      } else {
+        // Old schema (products only, no item_type)
+        itemsResult = await client.query(
+          `
+          SELECT 
+            ci.id, ci.quantity, ci.price,
+            p.id as product_id, p.name as product_name, p.description as product_description, 
+            p.stock as product_stock, p.images as product_images
+          FROM cart_items ci
+          LEFT JOIN products p ON ci.product_id = p.id
+          WHERE ci.cart_id = $1
+        `,
+          [cartId],
+        );
+      }
+
+      const formattedItems = itemsResult.rows
+        .map((item) => {
+          const itemType = item.item_type || "product"; // Default to product if no item_type
+
+          if (itemType === "product") {
+            return {
+              id: item.id,
+              type: "product",
+              product: {
+                id: item.product_id,
+                name: item.product_name,
+                description: item.product_description,
+                stock: item.product_stock,
+                images: item.product_images,
+              },
+              quantity: item.quantity,
+              price: parseFloat(item.price),
+            };
+          } else if (itemType === "service") {
+            return {
+              id: item.id,
+              type: "service",
+              service: {
+                id: item.service_id,
+                name: item.service_name,
+                category: item.service_category,
+              },
+              variant: {
+                id: item.variant_id,
+                name: item.variant_name,
+                description: item.variant_description,
+                duration: item.duration,
+                features: item.features,
+              },
+              quantity: item.quantity,
+              price: parseFloat(item.price),
+            };
+          }
+          return null;
+        })
+        .filter(Boolean);
+
+      return {
+        id: cart.id,
+        user_id: cart.user_id,
+        subtotal: parseFloat(cart.subtotal) || 0,
+        total: parseFloat(cart.total) || 0,
+        items: formattedItems,
+        created_at: cart.created_at,
+        updated_at: cart.updated_at,
+      };
+    } catch (error) {
+      console.error("Get formatted cart data error:", error);
+      throw error;
+    }
   }
 
   /**
