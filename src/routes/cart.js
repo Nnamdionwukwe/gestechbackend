@@ -1,3 +1,4 @@
+// src/routes/cart.js
 const express = require("express");
 const router = express.Router();
 const cartController = require("../controllers/CartController");
@@ -17,7 +18,7 @@ router.get("/", cartController.getCart);
  * @route   POST /api/cart/add
  * @desc    Add item to cart
  * @access  Private
- * @body    { productId, quantity }
+ * @body    { productId?, serviceVariantId?, quantity }
  */
 router.post("/add", cartController.addToCart);
 
@@ -25,16 +26,17 @@ router.post("/add", cartController.addToCart);
  * @route   PUT /api/cart/update
  * @desc    Update cart item quantity
  * @access  Private
- * @body    { productId, quantity }
+ * @body    { cartItemId, quantity }
  */
 router.put("/update", cartController.updateCartItem);
 
 /**
- * @route   DELETE /api/cart/remove/:productId
+ * @route   DELETE /api/cart/remove/:cartItemId
  * @desc    Remove item from cart
  * @access  Private
+ * @param   cartItemId - The cart item ID to remove
  */
-router.delete("/remove/:productId", cartController.removeFromCart);
+router.delete("/remove/:cartItemId", cartController.removeFromCart);
 
 /**
  * @route   DELETE /api/cart/clear
