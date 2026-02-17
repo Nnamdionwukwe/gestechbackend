@@ -1,3 +1,6 @@
+// src/controllers/CartController.js
+const db = require("../config/database");
+
 class CartController {
   /**
    * Helper function to get formatted cart data
@@ -15,7 +18,7 @@ class CartController {
 
       const cart = cartResult.rows[0];
 
-      // Check if item_type column exists
+      // Check if item_type column exists (indicates updated cart_items table)
       const columnCheck = await client.query(`
         SELECT EXISTS (
           SELECT FROM information_schema.columns 
@@ -29,6 +32,7 @@ class CartController {
       let itemsResult;
 
       if (hasItemType) {
+        // New schema with service variants support
         const tableCheck = await client.query(`
           SELECT EXISTS (
             SELECT FROM information_schema.tables 
@@ -39,8 +43,10 @@ class CartController {
         const hasServiceVariants = tableCheck.rows[0].exists;
 
         if (hasServiceVariants) {
+          // Full query with services
           itemsResult = await client.query(
-            `SELECT 
+            `
+            SELECT 
               ci.id, ci.quantity, ci.price, ci.item_type,
               p.id as product_id, p.name as product_name, p.description as product_description, 
               p.stock as product_stock, p.images as product_images,
@@ -51,37 +57,44 @@ class CartController {
             LEFT JOIN products p ON ci.product_id = p.id AND ci.item_type = 'product'
             LEFT JOIN service_variants sv ON ci.service_variant_id = sv.id AND ci.item_type = 'service'
             LEFT JOIN services s ON sv.service_id = s.id
-            WHERE ci.cart_id = $1`,
+            WHERE ci.cart_id = $1
+          `,
             [cartId],
           );
         } else {
+          // Query without service variants
           itemsResult = await client.query(
-            `SELECT 
+            `
+            SELECT 
               ci.id, ci.quantity, ci.price, ci.item_type,
               p.id as product_id, p.name as product_name, p.description as product_description, 
               p.stock as product_stock, p.images as product_images
             FROM cart_items ci
             LEFT JOIN products p ON ci.product_id = p.id
-            WHERE ci.cart_id = $1`,
+            WHERE ci.cart_id = $1
+          `,
             [cartId],
           );
         }
       } else {
+        // Old schema (products only, no item_type)
         itemsResult = await client.query(
-          `SELECT 
+          `
+          SELECT 
             ci.id, ci.quantity, ci.price,
             p.id as product_id, p.name as product_name, p.description as product_description, 
             p.stock as product_stock, p.images as product_images
           FROM cart_items ci
           LEFT JOIN products p ON ci.product_id = p.id
-          WHERE ci.cart_id = $1`,
+          WHERE ci.cart_id = $1
+        `,
           [cartId],
         );
       }
 
       const formattedItems = itemsResult.rows
         .map((item) => {
-          const itemType = item.item_type || "product";
+          const itemType = item.item_type || "product"; // Default to product if no item_type
 
           if (itemType === "product") {
             return {
@@ -135,8 +148,6 @@ class CartController {
       throw error;
     }
   }
-
-  // Rest of your methods...
 
   /**
    * Get user's cart
