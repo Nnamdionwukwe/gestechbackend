@@ -1,3 +1,4 @@
+// src/routes/orders.js
 const express = require("express");
 const router = express.Router();
 const orderController = require("../controllers/orderController");
@@ -6,6 +7,14 @@ const { authenticate, authorize } = require("../middleware/auth");
 // ========================================
 // USER ROUTES (Authenticated)
 // ========================================
+
+/**
+ * @route   POST /api/orders
+ * @desc    Create order from cart
+ * @access  Private
+ * @body    { shippingAddress, billingAddress?, paymentMethod, notes? }
+ */
+router.post("/", authenticate, orderController.createOrder);
 
 /**
  * @route   GET /api/orders
