@@ -33,23 +33,15 @@ class OrderController {
         [userId],
       );
 
-      if (cartResult.rows.length === 0) {
+      if (
+        cartResult.rows.length === 0 ||
+        parseFloat(cartResult.rows[0].total) <= 0
+      ) {
         await client.query("ROLLBACK");
-        return res.status(404).json({
-          success: false,
-          error: "Cart is empty",
-        });
+        return res.status(400).json({ success: false, error: "Cart is empty" });
       }
 
       const cart = cartResult.rows[0];
-
-      if (parseFloat(cart.total) <= 0) {
-        await client.query("ROLLBACK");
-        return res.status(400).json({
-          success: false,
-          error: "Cart is empty",
-        });
-      }
 
       // Get cart items
       const cartItemsResult = await client.query(
@@ -70,10 +62,7 @@ class OrderController {
 
       if (cartItemsResult.rows.length === 0) {
         await client.query("ROLLBACK");
-        return res.status(400).json({
-          success: false,
-          error: "Cart is empty",
-        });
+        return res.status(400).json({ success: false, error: "Cart is empty" });
       }
 
       console.log("✅ Cart has", cartItemsResult.rows.length, "items");
@@ -84,11 +73,14 @@ class OrderController {
 
       // Calculate totals
       const subtotal = parseFloat(cart.subtotal);
-      const shippingCost = 0; // You can add shipping calculation logic here
-      const tax = 0; // You can add tax calculation logic here
+      const shippingCost = 0;
+      const tax = 0;
       const total = subtotal + shippingCost + tax;
 
-      // Create order
+      // Flatten address fields from the shippingAddress object
+      const billing = billingAddress || shippingAddress;
+
+      // Create order — using flat columns as seen in DB screenshots
       const orderResult = await client.query(
         `INSERT INTO orders (
           id,
@@ -102,10 +94,24 @@ class OrderController {
           tax,
           total,
           shipping_address,
+          shipping_city,
+          shipping_state,
+          shipping_country,
+          shipping_postal_code,
+          shipping_phone,
           billing_address,
+          billing_city,
+          billing_state,
+          billing_country,
+          billing_postal_code,
+          billing_phone,
           notes
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-        RETURNING *`,
+        ) VALUES (
+          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
+          $11,$12,$13,$14,$15,$16,
+          $17,$18,$19,$20,$21,$22,
+          $23
+        ) RETURNING *`,
         [
           uuidv4(),
           userId,
@@ -117,8 +123,20 @@ class OrderController {
           shippingCost,
           tax,
           total,
-          JSON.stringify(shippingAddress),
-          JSON.stringify(billingAddress || shippingAddress),
+          // Shipping address fields
+          shippingAddress.address || shippingAddress.street || null,
+          shippingAddress.city || null,
+          shippingAddress.state || null,
+          shippingAddress.country || "Nigeria",
+          shippingAddress.postalCode || shippingAddress.postal_code || null,
+          shippingAddress.phone || null,
+          // Billing address fields
+          billing.address || billing.street || null,
+          billing.city || null,
+          billing.state || null,
+          billing.country || "Nigeria",
+          billing.postalCode || billing.postal_code || null,
+          billing.phone || null,
           notes || null,
         ],
       );
@@ -154,7 +172,7 @@ class OrderController {
           ],
         );
 
-        // Reduce product stock if it's a product
+        // Reduce stock for products
         if (item.item_type === "product" && item.product_id) {
           await client.query(
             "UPDATE products SET stock = stock - $1 WHERE id = $2",
@@ -236,7 +254,6 @@ class OrderController {
 
       const result = await client.query(query, params);
 
-      // Get total count
       const countQuery = status
         ? "SELECT COUNT(*) FROM orders WHERE user_id = $1 AND order_status = $2"
         : "SELECT COUNT(*) FROM orders WHERE user_id = $1";
@@ -283,22 +300,19 @@ class OrderController {
       const { id } = req.params;
       const userId = req.user.id;
 
-      // Get order
       const orderResult = await client.query(
         "SELECT * FROM orders WHERE id = $1 AND user_id = $2",
         [id, userId],
       );
 
       if (orderResult.rows.length === 0) {
-        return res.status(404).json({
-          success: false,
-          error: "Order not found",
-        });
+        return res
+          .status(404)
+          .json({ success: false, error: "Order not found" });
       }
 
       const order = orderResult.rows[0];
 
-      // Get order items
       const itemsResult = await client.query(
         `SELECT 
           oi.*,
@@ -310,7 +324,6 @@ class OrderController {
         [id],
       );
 
-      // Get payment info
       const paymentResult = await client.query(
         "SELECT * FROM payments WHERE order_id = $1",
         [id],
@@ -350,7 +363,48 @@ class OrderController {
     }
   }
 
-  // ... REST OF THE METHODS FROM YOUR EXISTING CONTROLLER
+  /**
+   * Get order by order number
+   * GET /api/orders/number/:orderNumber
+   */
+  async getOrderByNumber(req, res) {
+    const client = await db.pool.connect();
+    try {
+      const { orderNumber } = req.params;
+      const userId = req.user.id;
+
+      const orderResult = await client.query(
+        "SELECT * FROM orders WHERE order_number = $1 AND user_id = $2",
+        [orderNumber, userId],
+      );
+
+      if (orderResult.rows.length === 0) {
+        return res
+          .status(404)
+          .json({ success: false, error: "Order not found" });
+      }
+
+      const order = orderResult.rows[0];
+
+      return res.json({
+        success: true,
+        data: {
+          ...order,
+          subtotal: parseFloat(order.subtotal),
+          shipping_cost: parseFloat(order.shipping_cost),
+          tax: parseFloat(order.tax),
+          total: parseFloat(order.total),
+        },
+      });
+    } catch (error) {
+      console.error("Get order by number error:", error);
+      return res
+        .status(500)
+        .json({ success: false, error: "Failed to fetch order" });
+    } finally {
+      client.release();
+    }
+  }
 
   /**
    * Cancel order
@@ -372,10 +426,9 @@ class OrderController {
 
       if (orderResult.rows.length === 0) {
         await client.query("ROLLBACK");
-        return res.status(404).json({
-          success: false,
-          error: "Order not found",
-        });
+        return res
+          .status(404)
+          .json({ success: false, error: "Order not found" });
       }
 
       const order = orderResult.rows[0];
@@ -390,12 +443,14 @@ class OrderController {
 
       await client.query(
         `UPDATE orders 
-        SET order_status = 'cancelled', 
-            notes = CONCAT(COALESCE(notes, ''), ' | Cancellation reason: ', $1)
-        WHERE id = $2`,
+         SET order_status = 'cancelled',
+             notes = CONCAT(COALESCE(notes, ''), ' | Cancellation reason: ', $1),
+             updated_at = NOW()
+         WHERE id = $2`,
         [reason || "Customer requested cancellation", id],
       );
 
+      // Restore stock
       const itemsResult = await client.query(
         "SELECT product_id, quantity FROM order_items WHERE order_id = $1 AND item_type = 'product'",
         [id],
@@ -428,34 +483,15 @@ class OrderController {
       client.release();
     }
   }
-  async getOrderByNumber(req, res) {
-    const client = await db.pool.connect();
-    try {
-      const { orderNumber } = req.params;
-      const userId = req.user.id;
 
-      const orderResult = await client.query(
-        "SELECT * FROM orders WHERE order_number = $1 AND user_id = $2",
-        [orderNumber, userId],
-      );
+  // ========================================
+  // ADMIN METHODS
+  // ========================================
 
-      if (orderResult.rows.length === 0) {
-        return res
-          .status(404)
-          .json({ success: false, error: "Order not found" });
-      }
-
-      return res.json({ success: true, data: orderResult.rows[0] });
-    } catch (error) {
-      console.error("Get order by number error:", error);
-      return res
-        .status(500)
-        .json({ success: false, error: "Failed to fetch order" });
-    } finally {
-      client.release();
-    }
-  }
-
+  /**
+   * Get all orders (Admin)
+   * GET /api/orders/admin/all
+   */
   async getAllOrders(req, res) {
     const client = await db.pool.connect();
     try {
@@ -466,8 +502,8 @@ class OrderController {
         offset = 0,
         search,
       } = req.query;
-      let params = [];
-      let conditions = [];
+      const params = [];
+      const conditions = [];
 
       if (status) {
         params.push(status);
@@ -486,19 +522,46 @@ class OrderController {
         ? `WHERE ${conditions.join(" AND ")}`
         : "";
 
-      params.push(limit, offset);
+      params.push(parseInt(limit), parseInt(offset));
+
       const result = await client.query(
         `SELECT o.*, COUNT(oi.id) as item_count
-       FROM orders o
-       LEFT JOIN order_items oi ON o.id = oi.order_id
-       ${where}
-       GROUP BY o.id
-       ORDER BY o.created_at DESC
-       LIMIT $${params.length - 1} OFFSET $${params.length}`,
+         FROM orders o
+         LEFT JOIN order_items oi ON o.id = oi.order_id
+         ${where}
+         GROUP BY o.id
+         ORDER BY o.created_at DESC
+         LIMIT $${params.length - 1} OFFSET $${params.length}`,
         params,
       );
 
-      return res.json({ success: true, data: result.rows });
+      // Total count
+      const countParams = conditions.length
+        ? params.slice(0, params.length - 2)
+        : [];
+      const countResult = await client.query(
+        `SELECT COUNT(*) FROM orders o ${where}`,
+        countParams,
+      );
+
+      return res.json({
+        success: true,
+        data: {
+          orders: result.rows.map((o) => ({
+            ...o,
+            subtotal: parseFloat(o.subtotal),
+            shipping_cost: parseFloat(o.shipping_cost),
+            tax: parseFloat(o.tax),
+            total: parseFloat(o.total),
+            item_count: parseInt(o.item_count),
+          })),
+          pagination: {
+            total: parseInt(countResult.rows[0].count),
+            limit: parseInt(limit),
+            offset: parseInt(offset),
+          },
+        },
+      });
     } catch (error) {
       console.error("Get all orders error:", error);
       return res
@@ -509,21 +572,64 @@ class OrderController {
     }
   }
 
+  /**
+   * Update order status (Admin)
+   * PUT /api/orders/admin/:id/status
+   */
   async updateOrderStatus(req, res) {
     const client = await db.pool.connect();
     try {
       const { id } = req.params;
       const { order_status, tracking_number, notes } = req.body;
 
+      if (!order_status) {
+        return res
+          .status(400)
+          .json({ success: false, error: "order_status is required" });
+      }
+
+      const validStatuses = [
+        "pending",
+        "processing",
+        "shipped",
+        "delivered",
+        "cancelled",
+      ];
+      if (!validStatuses.includes(order_status)) {
+        return res.status(400).json({
+          success: false,
+          error: `Invalid status. Must be one of: ${validStatuses.join(", ")}`,
+        });
+      }
+
+      // Set paid_at / delivered_at timestamps automatically
+      const extraFields = [];
+      const params = [order_status];
+
+      if (tracking_number) {
+        params.push(tracking_number);
+        extraFields.push(`tracking_number = $${params.length}`);
+      }
+      if (notes) {
+        params.push(notes);
+        extraFields.push(
+          `notes = CONCAT(COALESCE(notes, ''), ' | ', $${params.length})`,
+        );
+      }
+      if (order_status === "delivered") {
+        extraFields.push(`delivered_at = NOW()`);
+      }
+
+      params.push(id);
+
       const result = await client.query(
-        `UPDATE orders 
-       SET order_status = $1,
-           tracking_number = COALESCE($2, tracking_number),
-           notes = COALESCE($3, notes),
-           updated_at = NOW()
-       WHERE id = $4
-       RETURNING *`,
-        [order_status, tracking_number || null, notes || null, id],
+        `UPDATE orders
+         SET order_status = $1,
+             ${extraFields.length ? extraFields.join(", ") + "," : ""}
+             updated_at = NOW()
+         WHERE id = $${params.length}
+         RETURNING *`,
+        params,
       );
 
       if (result.rows.length === 0) {
@@ -543,6 +649,10 @@ class OrderController {
     }
   }
 
+  /**
+   * Get order statistics (Admin)
+   * GET /api/orders/admin/stats
+   */
   async getOrderStats(req, res) {
     const client = await db.pool.connect();
     try {
@@ -557,17 +667,39 @@ class OrderController {
 
       const result = await client.query(
         `SELECT
-         COUNT(*) as total_orders,
-         SUM(total) as total_revenue,
-         COUNT(*) FILTER (WHERE order_status = 'pending') as pending,
-         COUNT(*) FILTER (WHERE order_status = 'processing') as processing,
-         COUNT(*) FILTER (WHERE order_status = 'completed') as completed,
-         COUNT(*) FILTER (WHERE order_status = 'cancelled') as cancelled
-       FROM orders ${dateFilter}`,
+           COUNT(*)                                                        AS total_orders,
+           COALESCE(SUM(total), 0)                                        AS total_revenue,
+           COUNT(*) FILTER (WHERE order_status = 'pending')               AS pending,
+           COUNT(*) FILTER (WHERE order_status = 'processing')            AS processing,
+           COUNT(*) FILTER (WHERE order_status = 'shipped')               AS shipped,
+           COUNT(*) FILTER (WHERE order_status = 'delivered')             AS delivered,
+           COUNT(*) FILTER (WHERE order_status = 'cancelled')             AS cancelled,
+           COUNT(*) FILTER (WHERE payment_status = 'paid')                AS paid_orders,
+           COALESCE(AVG(total), 0)                                        AS average_order_value
+         FROM orders ${dateFilter}`,
         params,
       );
 
-      return res.json({ success: true, data: result.rows[0] });
+      const row = result.rows[0];
+
+      return res.json({
+        success: true,
+        data: {
+          total_orders: parseInt(row.total_orders),
+          total_revenue: parseFloat(row.total_revenue),
+          average_order_value: parseFloat(
+            parseFloat(row.average_order_value).toFixed(2),
+          ),
+          paid_orders: parseInt(row.paid_orders),
+          by_status: {
+            pending: parseInt(row.pending),
+            processing: parseInt(row.processing),
+            shipped: parseInt(row.shipped),
+            delivered: parseInt(row.delivered),
+            cancelled: parseInt(row.cancelled),
+          },
+        },
+      });
     } catch (error) {
       console.error("Get order stats error:", error);
       return res
