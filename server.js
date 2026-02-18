@@ -119,6 +119,8 @@ const cartRoute = require("./src/routes/cart");
 const checkoutRoutes = require("./src/routes/checkout.js");
 const orderRoutes = require("./src/routes/orders");
 const paymentRoutes = require("./src/routes/payments");
+const payStackRoutes = require("./src/routes/Paystack");
+const contactRoutes = require("./src/routes/contact");
 
 app.use("/api/agency", agencyRoutes);
 app.use("/api/auth", authRoutes);
@@ -129,6 +131,8 @@ app.use("/api/cart", cartRoute);
 app.use("/api/checkout", checkoutRoutes);
 app.use("/api/orders", orderRoutes);
 app.use("/api/payments", paymentRoutes);
+app.use("/api/paystack", payStackRoutes);
+app.use("/api/contact", contactRoutes);
 // ========================================
 // ERROR HANDLERS
 // ========================================
