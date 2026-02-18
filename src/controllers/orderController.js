@@ -317,7 +317,7 @@ class OrderController {
       );
 
       return res.json({
-        success: false,
+        success: true,
         data: {
           order: {
             ...order,
