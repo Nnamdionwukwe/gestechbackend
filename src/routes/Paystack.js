@@ -4,7 +4,7 @@ const router = express.Router();
 const { authenticate } = require("../middleware/auth");
 
 // Import the controller - Make sure this path is correct!
-const paystackController = require("../controllers/paystackController");
+const paystackController = require("../controllers/PaystackController");
 
 // DEBUGGING: Check what we imported
 console.log("Paystack Controller:", typeof paystackController);
