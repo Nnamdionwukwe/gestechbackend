@@ -428,9 +428,155 @@ class OrderController {
       client.release();
     }
   }
+  async getOrderByNumber(req, res) {
+    const client = await db.pool.connect();
+    try {
+      const { orderNumber } = req.params;
+      const userId = req.user.id;
 
-  // KEEP ALL YOUR EXISTING ADMIN METHODS HERE
-  // (getAllOrders, updateOrderStatus, getOrderStats, etc.)
+      const orderResult = await client.query(
+        "SELECT * FROM orders WHERE order_number = $1 AND user_id = $2",
+        [orderNumber, userId],
+      );
+
+      if (orderResult.rows.length === 0) {
+        return res
+          .status(404)
+          .json({ success: false, error: "Order not found" });
+      }
+
+      return res.json({ success: true, data: orderResult.rows[0] });
+    } catch (error) {
+      console.error("Get order by number error:", error);
+      return res
+        .status(500)
+        .json({ success: false, error: "Failed to fetch order" });
+    } finally {
+      client.release();
+    }
+  }
+
+  async getAllOrders(req, res) {
+    const client = await db.pool.connect();
+    try {
+      const {
+        status,
+        payment_status,
+        limit = 10,
+        offset = 0,
+        search,
+      } = req.query;
+      let params = [];
+      let conditions = [];
+
+      if (status) {
+        params.push(status);
+        conditions.push(`o.order_status = $${params.length}`);
+      }
+      if (payment_status) {
+        params.push(payment_status);
+        conditions.push(`o.payment_status = $${params.length}`);
+      }
+      if (search) {
+        params.push(`%${search}%`);
+        conditions.push(`o.order_number ILIKE $${params.length}`);
+      }
+
+      const where = conditions.length
+        ? `WHERE ${conditions.join(" AND ")}`
+        : "";
+
+      params.push(limit, offset);
+      const result = await client.query(
+        `SELECT o.*, COUNT(oi.id) as item_count
+       FROM orders o
+       LEFT JOIN order_items oi ON o.id = oi.order_id
+       ${where}
+       GROUP BY o.id
+       ORDER BY o.created_at DESC
+       LIMIT $${params.length - 1} OFFSET $${params.length}`,
+        params,
+      );
+
+      return res.json({ success: true, data: result.rows });
+    } catch (error) {
+      console.error("Get all orders error:", error);
+      return res
+        .status(500)
+        .json({ success: false, error: "Failed to fetch orders" });
+    } finally {
+      client.release();
+    }
+  }
+
+  async updateOrderStatus(req, res) {
+    const client = await db.pool.connect();
+    try {
+      const { id } = req.params;
+      const { order_status, tracking_number, notes } = req.body;
+
+      const result = await client.query(
+        `UPDATE orders 
+       SET order_status = $1,
+           tracking_number = COALESCE($2, tracking_number),
+           notes = COALESCE($3, notes),
+           updated_at = NOW()
+       WHERE id = $4
+       RETURNING *`,
+        [order_status, tracking_number || null, notes || null, id],
+      );
+
+      if (result.rows.length === 0) {
+        return res
+          .status(404)
+          .json({ success: false, error: "Order not found" });
+      }
+
+      return res.json({ success: true, data: result.rows[0] });
+    } catch (error) {
+      console.error("Update order status error:", error);
+      return res
+        .status(500)
+        .json({ success: false, error: "Failed to update order" });
+    } finally {
+      client.release();
+    }
+  }
+
+  async getOrderStats(req, res) {
+    const client = await db.pool.connect();
+    try {
+      const { start_date, end_date } = req.query;
+      const params = [];
+      let dateFilter = "";
+
+      if (start_date && end_date) {
+        params.push(start_date, end_date);
+        dateFilter = `WHERE created_at BETWEEN $1 AND $2`;
+      }
+
+      const result = await client.query(
+        `SELECT
+         COUNT(*) as total_orders,
+         SUM(total) as total_revenue,
+         COUNT(*) FILTER (WHERE order_status = 'pending') as pending,
+         COUNT(*) FILTER (WHERE order_status = 'processing') as processing,
+         COUNT(*) FILTER (WHERE order_status = 'completed') as completed,
+         COUNT(*) FILTER (WHERE order_status = 'cancelled') as cancelled
+       FROM orders ${dateFilter}`,
+        params,
+      );
+
+      return res.json({ success: true, data: result.rows[0] });
+    } catch (error) {
+      console.error("Get order stats error:", error);
+      return res
+        .status(500)
+        .json({ success: false, error: "Failed to fetch stats" });
+    } finally {
+      client.release();
+    }
+  }
 }
 
 module.exports = new OrderController();
