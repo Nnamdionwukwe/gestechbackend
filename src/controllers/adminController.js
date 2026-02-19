@@ -181,6 +181,69 @@ exports.deleteService = async (req, res) => {
 };
 
 // ==================== PORTFOLIO/PROJECTS MANAGEMENT ====================
+// Add this method to src/controllers/adminController.js
+
+// Get all projects (Admin)
+exports.getAllProjects = async (req, res) => {
+  try {
+    const { category, is_published, page = 1, limit = 50 } = req.query;
+    const offset = (page - 1) * limit;
+
+    let query = "SELECT * FROM portfolio_projects WHERE 1=1";
+    const params = [];
+
+    if (category) {
+      params.push(category);
+      query += ` AND category = $${params.length}`;
+    }
+
+    if (is_published !== undefined) {
+      params.push(is_published === "true");
+      query += ` AND is_published = $${params.length}`;
+    }
+
+    query += ` ORDER BY display_order ASC, created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+    params.push(parseInt(limit), parseInt(offset));
+
+    const projects = await db.query(query, params);
+
+    // Get total count
+    let countQuery =
+      "SELECT COUNT(*) as total FROM portfolio_projects WHERE 1=1";
+    const countParams = [];
+
+    if (category) {
+      countParams.push(category);
+      countQuery += ` AND category = $${countParams.length}`;
+    }
+
+    if (is_published !== undefined) {
+      countParams.push(is_published === "true");
+      countQuery += ` AND is_published = $${countParams.length}`;
+    }
+
+    const total = await db.query(countQuery, countParams);
+
+    res.json({
+      success: true,
+      data: {
+        projects: projects.rows,
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total: parseInt(total.rows[0].total),
+          pages: Math.ceil(total.rows[0].total / limit),
+        },
+      },
+    });
+  } catch (error) {
+    console.error("Get all projects error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to fetch projects",
+    });
+  }
+};
 
 // Create project
 exports.createProject = async (req, res) => {
@@ -502,7 +565,71 @@ exports.deleteTestimonial = async (req, res) => {
   }
 };
 
-// ==================== TEAM MEMBERS MANAGEMENT ====================
+// ==================== TEAM MEMBERS MANAGEMENT ====================9
+// ── GET /api/admin/team ──────────────────────────────────────────────────
+exports.getAllTeamMembers = async (req, res) => {
+  try {
+    const { department, is_active, search, page = 1, limit = 12 } = req.query;
+    const offset = (page - 1) * limit;
+
+    const params = [];
+    const conditions = [];
+
+    if (department) {
+      params.push(department);
+      conditions.push(`department = $${params.length}`);
+    }
+
+    if (is_active !== undefined && is_active !== "") {
+      params.push(is_active === "true");
+      conditions.push(`is_active = $${params.length}`);
+    }
+
+    if (search) {
+      params.push(`%${search}%`);
+      conditions.push(
+        `(full_name ILIKE $${params.length} OR position ILIKE $${params.length} OR email ILIKE $${params.length})`,
+      );
+    }
+
+    const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+
+    // Data query
+    params.push(parseInt(limit), parseInt(offset));
+    const members = await db.query(
+      `SELECT * FROM team_members
+       ${where}
+       ORDER BY display_order ASC, created_at DESC
+       LIMIT $${params.length - 1} OFFSET $${params.length}`,
+      params,
+    );
+
+    // Count query (reuse same conditions, minus limit/offset)
+    const countParams = params.slice(0, params.length - 2);
+    const total = await db.query(
+      `SELECT COUNT(*) as total FROM team_members ${where}`,
+      countParams,
+    );
+
+    res.json({
+      success: true,
+      data: {
+        members: members.rows,
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total: parseInt(total.rows[0].total),
+          pages: Math.ceil(total.rows[0].total / parseInt(limit)),
+        },
+      },
+    });
+  } catch (error) {
+    console.error("Get all team members error:", error);
+    res
+      .status(500)
+      .json({ success: false, error: "Failed to fetch team members" });
+  }
+};
 
 // Create team member
 exports.createTeamMember = async (req, res) => {
@@ -651,6 +778,73 @@ exports.deleteTeamMember = async (req, res) => {
 };
 
 // ==================== BLOG POSTS MANAGEMENT ====================
+// ============================================================
+// ADD THESE TWO METHODS TO src/controllers/adminController.js
+// Place them above the getDashboardStats function
+// ============================================================
+
+// ── GET /api/admin/blog ──────────────────────────────────────────────────
+exports.getAllBlogPosts = async (req, res) => {
+  try {
+    const { status, category, search, page = 1, limit = 10 } = req.query;
+    const offset = (page - 1) * limit;
+
+    const params = [];
+    const conditions = [];
+
+    if (status) {
+      params.push(status);
+      conditions.push(`status = $${params.length}`);
+    }
+
+    if (category) {
+      params.push(category);
+      conditions.push(`category = $${params.length}`);
+    }
+
+    if (search) {
+      params.push(`%${search}%`);
+      conditions.push(
+        `(title ILIKE $${params.length} OR author_name ILIKE $${params.length} OR category ILIKE $${params.length})`,
+      );
+    }
+
+    const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+
+    params.push(parseInt(limit), parseInt(offset));
+    const posts = await db.query(
+      `SELECT * FROM blog_posts
+       ${where}
+       ORDER BY created_at DESC
+       LIMIT $${params.length - 1} OFFSET $${params.length}`,
+      params,
+    );
+
+    const countParams = params.slice(0, params.length - 2);
+    const total = await db.query(
+      `SELECT COUNT(*) as total FROM blog_posts ${where}`,
+      countParams,
+    );
+
+    res.json({
+      success: true,
+      data: {
+        posts: posts.rows,
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total: parseInt(total.rows[0].total),
+          pages: Math.ceil(total.rows[0].total / parseInt(limit)),
+        },
+      },
+    });
+  } catch (error) {
+    console.error("Get all blog posts error:", error);
+    res
+      .status(500)
+      .json({ success: false, error: "Failed to fetch blog posts" });
+  }
+};
 
 // Create blog post
 exports.createBlogPost = async (req, res) => {
@@ -1025,70 +1219,6 @@ exports.deleteSubscriber = async (req, res) => {
     res.status(500).json({
       success: false,
       error: "Failed to delete subscriber",
-    });
-  }
-};
-
-// Add this method to src/controllers/adminController.js
-
-// Get all projects (Admin)
-exports.getAllProjects = async (req, res) => {
-  try {
-    const { category, is_published, page = 1, limit = 50 } = req.query;
-    const offset = (page - 1) * limit;
-
-    let query = "SELECT * FROM portfolio_projects WHERE 1=1";
-    const params = [];
-
-    if (category) {
-      params.push(category);
-      query += ` AND category = $${params.length}`;
-    }
-
-    if (is_published !== undefined) {
-      params.push(is_published === "true");
-      query += ` AND is_published = $${params.length}`;
-    }
-
-    query += ` ORDER BY display_order ASC, created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
-    params.push(parseInt(limit), parseInt(offset));
-
-    const projects = await db.query(query, params);
-
-    // Get total count
-    let countQuery =
-      "SELECT COUNT(*) as total FROM portfolio_projects WHERE 1=1";
-    const countParams = [];
-
-    if (category) {
-      countParams.push(category);
-      countQuery += ` AND category = $${countParams.length}`;
-    }
-
-    if (is_published !== undefined) {
-      countParams.push(is_published === "true");
-      countQuery += ` AND is_published = $${countParams.length}`;
-    }
-
-    const total = await db.query(countQuery, countParams);
-
-    res.json({
-      success: true,
-      data: {
-        projects: projects.rows,
-        pagination: {
-          page: parseInt(page),
-          limit: parseInt(limit),
-          total: parseInt(total.rows[0].total),
-          pages: Math.ceil(total.rows[0].total / limit),
-        },
-      },
-    });
-  } catch (error) {
-    console.error("Get all projects error:", error);
-    res.status(500).json({
-      success: false,
-      error: "Failed to fetch projects",
     });
   }
 };
