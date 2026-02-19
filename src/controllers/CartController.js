@@ -3,6 +3,124 @@ const db = require("../config/database");
 
 class CartController {
   /**
+   * Helper: Build formatted cart response from a connected client
+   * Used internally to avoid connection conflicts
+   */
+  async _buildCartResponse(client, cartId) {
+    const cartResult = await client.query("SELECT * FROM carts WHERE id = $1", [
+      cartId,
+    ]);
+
+    const cart = cartResult.rows[0];
+
+    const itemsResult = await client.query(
+      `
+      SELECT 
+        ci.id, ci.quantity, ci.price, ci.item_type,
+        -- Product fields
+        p.id as product_id, p.name as product_name, p.description as product_description, 
+        p.stock as product_stock, p.images as product_images,
+        -- Service variant fields
+        sv.id as variant_id, sv.name as variant_name, sv.description as variant_description,
+        sv.duration, sv.features,
+        s.id as service_id, s.name as service_name, s.category as service_category
+      FROM cart_items ci
+      LEFT JOIN products p ON ci.product_id = p.id AND ci.item_type = 'product'
+      LEFT JOIN service_variants sv ON ci.service_variant_id = sv.id AND ci.item_type = 'service'
+      LEFT JOIN services s ON sv.service_id = s.id
+      WHERE ci.cart_id = $1
+      `,
+      [cartId],
+    );
+
+    const formattedItems = itemsResult.rows.map((item) => {
+      if (item.item_type === "product") {
+        return {
+          id: item.id,
+          type: "product",
+          product: {
+            id: item.product_id,
+            name: item.product_name,
+            description: item.product_description,
+            stock: item.product_stock,
+            images: item.product_images,
+          },
+          quantity: item.quantity,
+          price: parseFloat(item.price),
+        };
+      } else {
+        return {
+          id: item.id,
+          type: "service",
+          service: {
+            id: item.service_id,
+            name: item.service_name,
+            category: item.service_category,
+          },
+          variant: {
+            id: item.variant_id,
+            name: item.variant_name,
+            description: item.variant_description,
+            duration: item.duration,
+            features: item.features,
+          },
+          quantity: item.quantity,
+          price: parseFloat(item.price),
+        };
+      }
+    });
+
+    return {
+      id: cart.id,
+      user_id: cart.user_id,
+      subtotal: parseFloat(cart.subtotal),
+      total: parseFloat(cart.total),
+      items: formattedItems,
+      created_at: cart.created_at,
+      updated_at: cart.updated_at,
+    };
+  }
+
+  /**
+   * Helper: Get or create a cart for the user (within an existing transaction)
+   */
+  async _getOrCreateCart(client, userId) {
+    const cartResult = await client.query(
+      "SELECT * FROM carts WHERE user_id = $1",
+      [userId],
+    );
+
+    if (cartResult.rows.length === 0) {
+      const newCartResult = await client.query(
+        "INSERT INTO carts (user_id, subtotal, total) VALUES ($1, 0, 0) RETURNING *",
+        [userId],
+      );
+      return newCartResult.rows[0];
+    }
+
+    return cartResult.rows[0];
+  }
+
+  /**
+   * Helper: Recalculate and update cart totals (within an existing transaction)
+   */
+  async _recalculateTotals(client, cartId) {
+    const totalsResult = await client.query(
+      "SELECT SUM(quantity * price) as subtotal FROM cart_items WHERE cart_id = $1",
+      [cartId],
+    );
+
+    const subtotal = parseFloat(totalsResult.rows[0].subtotal) || 0;
+
+    await client.query(
+      "UPDATE carts SET subtotal = $1, total = $1 WHERE id = $2",
+      [subtotal, cartId],
+    );
+
+    return subtotal;
+  }
+
+  /**
    * Get user's cart
    * GET /api/cart
    */
@@ -11,93 +129,12 @@ class CartController {
     try {
       const userId = req.user.id;
 
-      // Get or create cart
-      let cartResult = await client.query(
-        "SELECT * FROM carts WHERE user_id = $1",
-        [userId],
-      );
-
-      let cart;
-      if (cartResult.rows.length === 0) {
-        // Create new cart
-        const newCartResult = await client.query(
-          "INSERT INTO carts (user_id, subtotal, total) VALUES ($1, 0, 0) RETURNING *",
-          [userId],
-        );
-        cart = newCartResult.rows[0];
-      } else {
-        cart = cartResult.rows[0];
-      }
-
-      // Get cart items with product/service details
-      const itemsResult = await client.query(
-        `
-        SELECT 
-          ci.id, ci.quantity, ci.price, ci.item_type,
-          -- Product fields
-          p.id as product_id, p.name as product_name, p.description as product_description, 
-          p.stock as product_stock, p.images as product_images,
-          -- Service variant fields
-          sv.id as variant_id, sv.name as variant_name, sv.description as variant_description,
-          sv.duration, sv.features,
-          s.id as service_id, s.name as service_name, s.category as service_category
-        FROM cart_items ci
-        LEFT JOIN products p ON ci.product_id = p.id AND ci.item_type = 'product'
-        LEFT JOIN service_variants sv ON ci.service_variant_id = sv.id AND ci.item_type = 'service'
-        LEFT JOIN services s ON sv.service_id = s.id
-        WHERE ci.cart_id = $1
-      `,
-        [cart.id],
-      );
-
-      const formattedItems = itemsResult.rows.map((item) => {
-        if (item.item_type === "product") {
-          return {
-            id: item.id,
-            type: "product",
-            product: {
-              id: item.product_id,
-              name: item.product_name,
-              description: item.product_description,
-              stock: item.product_stock,
-              images: item.product_images,
-            },
-            quantity: item.quantity,
-            price: parseFloat(item.price),
-          };
-        } else {
-          return {
-            id: item.id,
-            type: "service",
-            service: {
-              id: item.service_id,
-              name: item.service_name,
-              category: item.service_category,
-            },
-            variant: {
-              id: item.variant_id,
-              name: item.variant_name,
-              description: item.variant_description,
-              duration: item.duration,
-              features: item.features,
-            },
-            quantity: item.quantity,
-            price: parseFloat(item.price),
-          };
-        }
-      });
+      const cart = await this._getOrCreateCart(client, userId);
+      const cartData = await this._buildCartResponse(client, cart.id);
 
       return res.json({
         success: true,
-        data: {
-          id: cart.id,
-          user_id: cart.user_id,
-          subtotal: parseFloat(cart.subtotal),
-          total: parseFloat(cart.total),
-          items: formattedItems,
-          created_at: cart.created_at,
-          updated_at: cart.updated_at,
-        },
+        data: cartData,
       });
     } catch (error) {
       console.error("Get cart error:", error);
@@ -198,21 +235,7 @@ class CartController {
       }
 
       // Get or create cart
-      let cartResult = await client.query(
-        "SELECT * FROM carts WHERE user_id = $1",
-        [userId],
-      );
-
-      let cart;
-      if (cartResult.rows.length === 0) {
-        const newCartResult = await client.query(
-          "INSERT INTO carts (user_id, subtotal, total) VALUES ($1, 0, 0) RETURNING *",
-          [userId],
-        );
-        cart = newCartResult.rows[0];
-      } else {
-        cart = cartResult.rows[0];
-      }
+      const cart = await this._getOrCreateCart(client, userId);
 
       // Check if item already in cart
       const existingItemQuery =
@@ -258,23 +281,18 @@ class CartController {
         }
       }
 
-      // Calculate totals
-      const totalsResult = await client.query(
-        `SELECT SUM(quantity * price) as subtotal FROM cart_items WHERE cart_id = $1`,
-        [cart.id],
-      );
-
-      const subtotal = parseFloat(totalsResult.rows[0].subtotal) || 0;
-
-      await client.query(
-        "UPDATE carts SET subtotal = $1, total = $1 WHERE id = $2",
-        [subtotal, cart.id],
-      );
+      // Recalculate totals
+      await this._recalculateTotals(client, cart.id);
 
       await client.query("COMMIT");
 
-      // Get updated cart
-      return this.getCart(req, res);
+      // ✅ Build response BEFORE finally releases the client
+      const cartData = await this._buildCartResponse(client, cart.id);
+
+      return res.json({
+        success: true,
+        data: cartData,
+      });
     } catch (error) {
       await client.query("ROLLBACK");
       console.error("Add to cart error:", error);
@@ -284,7 +302,7 @@ class CartController {
         message: error.message,
       });
     } finally {
-      client.release();
+      client.release(); // ✅ Released AFTER response is built and sent
     }
   }
 
@@ -362,21 +380,17 @@ class CartController {
       ]);
 
       // Recalculate totals
-      const totalsResult = await client.query(
-        `SELECT SUM(quantity * price) as subtotal FROM cart_items WHERE cart_id = $1`,
-        [cart.id],
-      );
-
-      const subtotal = parseFloat(totalsResult.rows[0].subtotal) || 0;
-
-      await client.query(
-        "UPDATE carts SET subtotal = $1, total = $1 WHERE id = $2",
-        [subtotal, cart.id],
-      );
+      await this._recalculateTotals(client, cart.id);
 
       await client.query("COMMIT");
 
-      return this.getCart(req, res);
+      // ✅ Build response BEFORE finally releases the client
+      const cartData = await this._buildCartResponse(client, cart.id);
+
+      return res.json({
+        success: true,
+        data: cartData,
+      });
     } catch (error) {
       await client.query("ROLLBACK");
       console.error("Update cart error:", error);
@@ -386,7 +400,7 @@ class CartController {
         message: error.message,
       });
     } finally {
-      client.release();
+      client.release(); // ✅ Released AFTER response is built and sent
     }
   }
 
@@ -424,21 +438,17 @@ class CartController {
       );
 
       // Recalculate totals
-      const totalsResult = await client.query(
-        `SELECT SUM(quantity * price) as subtotal FROM cart_items WHERE cart_id = $1`,
-        [cart.id],
-      );
-
-      const subtotal = parseFloat(totalsResult.rows[0].subtotal) || 0;
-
-      await client.query(
-        "UPDATE carts SET subtotal = $1, total = $1 WHERE id = $2",
-        [subtotal, cart.id],
-      );
+      await this._recalculateTotals(client, cart.id);
 
       await client.query("COMMIT");
 
-      return this.getCart(req, res);
+      // ✅ Build response BEFORE finally releases the client
+      const cartData = await this._buildCartResponse(client, cart.id);
+
+      return res.json({
+        success: true,
+        data: cartData,
+      });
     } catch (error) {
       await client.query("ROLLBACK");
       console.error("Remove from cart error:", error);
@@ -448,7 +458,7 @@ class CartController {
         message: error.message,
       });
     } finally {
-      client.release();
+      client.release(); // ✅ Released AFTER response is built and sent
     }
   }
 
@@ -491,7 +501,13 @@ class CartController {
 
       await client.query("COMMIT");
 
-      return this.getCart(req, res);
+      // ✅ Build response BEFORE finally releases the client
+      const cartData = await this._buildCartResponse(client, cart.id);
+
+      return res.json({
+        success: true,
+        data: cartData,
+      });
     } catch (error) {
       await client.query("ROLLBACK");
       console.error("Clear cart error:", error);
@@ -501,7 +517,7 @@ class CartController {
         message: error.message,
       });
     } finally {
-      client.release();
+      client.release(); // ✅ Released AFTER response is built and sent
     }
   }
 }
