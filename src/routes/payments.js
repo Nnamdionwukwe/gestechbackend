@@ -1,7 +1,7 @@
 // src/routes/paystack.js
 const express = require("express");
 const router = express.Router();
-const paystackController = require("../controllers/paystackController");
+const paystackController = require("../controllers/PaystackController");
 const { authenticate } = require("../middleware/auth");
 
 /**
