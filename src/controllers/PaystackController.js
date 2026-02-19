@@ -24,7 +24,7 @@ class PaystackController {
       const amountInKobo = Math.round(parseFloat(amount) * 100);
 
       // Generate unique reference
-      const reference = `GTC-${Date.now()}-${orderId}`;
+      const reference = `GTC-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
 
       // Initialize payment with Paystack
       const response = await axios.post(
@@ -58,12 +58,14 @@ class PaystackController {
           [orderId, userId, amount, reference, reference],
         );
 
-        res.json({
+        // ✅ Include public_key so the frontend can open the Paystack popup
+        return res.json({
           success: true,
           data: {
             authorization_url: response.data.data.authorization_url,
             access_code: response.data.data.access_code,
             reference: reference,
+            public_key: process.env.PAYSTACK_PUBLIC_KEY, // ← required for inline popup
           },
         });
       } else {
@@ -71,7 +73,7 @@ class PaystackController {
       }
     } catch (error) {
       console.error("Initialize payment error:", error);
-      res.status(500).json({
+      return res.status(500).json({
         success: false,
         error: "Failed to initialize payment",
         message: error.response?.data?.message || error.message,
@@ -136,19 +138,19 @@ class PaystackController {
 
         await client.query("COMMIT");
 
-        res.json({
+        return res.json({
           success: true,
           message: "Payment verified successfully",
           data: {
             reference: transactionData.reference,
-            amount: transactionData.amount / 100, // Convert from kobo
+            amount: transactionData.amount / 100,
             status: transactionData.status,
             paid_at: transactionData.paid_at,
           },
         });
       } else {
         await client.query("ROLLBACK");
-        res.status(400).json({
+        return res.status(400).json({
           success: false,
           error: "Payment verification failed",
           status: transactionData.status,
@@ -157,7 +159,7 @@ class PaystackController {
     } catch (error) {
       await client.query("ROLLBACK");
       console.error("Verify payment error:", error);
-      res.status(500).json({
+      return res.status(500).json({
         success: false,
         error: "Failed to verify payment",
         message: error.response?.data?.message || error.message,
@@ -181,23 +183,20 @@ class PaystackController {
         .digest("hex");
 
       if (hash !== req.headers["x-paystack-signature"]) {
-        return res.status(401).json({
-          success: false,
-          error: "Invalid signature",
-        });
+        return res
+          .status(401)
+          .json({ success: false, error: "Invalid signature" });
       }
 
       const event = req.body;
 
-      // Handle different event types
       switch (event.event) {
-        case "charge.success":
+        case "charge.success": {
           await client.query("BEGIN");
 
           const reference = event.data.reference;
           const transactionData = event.data;
 
-          // Update payment
           await client.query(
             `UPDATE payments 
              SET status = 'completed',
@@ -207,7 +206,6 @@ class PaystackController {
             [JSON.stringify(transactionData), reference],
           );
 
-          // Update order
           const paymentResult = await client.query(
             "SELECT order_id FROM payments WHERE paystack_reference = $1",
             [reference],
@@ -225,6 +223,7 @@ class PaystackController {
 
           await client.query("COMMIT");
           break;
+        }
 
         case "charge.failed":
           await client.query(
@@ -240,11 +239,11 @@ class PaystackController {
           console.log("Unhandled webhook event:", event.event);
       }
 
-      res.json({ success: true });
+      return res.json({ success: true });
     } catch (error) {
       await client.query("ROLLBACK");
       console.error("Webhook error:", error);
-      res.status(500).json({
+      return res.status(500).json({
         success: false,
         error: "Webhook processing failed",
       });
@@ -265,13 +264,10 @@ class PaystackController {
         },
       });
 
-      res.json({
-        success: true,
-        data: response.data.data,
-      });
+      return res.json({ success: true, data: response.data.data });
     } catch (error) {
       console.error("Get banks error:", error);
-      res.status(500).json({
+      return res.status(500).json({
         success: false,
         error: "Failed to fetch banks",
         message: error.response?.data?.message || error.message,
@@ -304,7 +300,7 @@ class PaystackController {
       );
 
       if (response.data.status) {
-        res.json({
+        return res.json({
           success: true,
           data: {
             account_number: response.data.data.account_number,
@@ -313,14 +309,14 @@ class PaystackController {
           },
         });
       } else {
-        res.status(404).json({
+        return res.status(404).json({
           success: false,
           error: "Account verification failed",
         });
       }
     } catch (error) {
       console.error("Verify account error:", error);
-      res.status(500).json({
+      return res.status(500).json({
         success: false,
         error: "Failed to verify account",
         message: error.response?.data?.message || error.message,

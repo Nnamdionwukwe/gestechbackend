@@ -1,104 +1,57 @@
+// src/routes/paystack.js
 const express = require("express");
 const router = express.Router();
-const paymentController = require("../controllers/paymentController");
-const { authenticate, authorize } = require("../middleware/auth");
-
-// ========================================
-// USER ROUTES (Authenticated)
-// ========================================
+const paystackController = require("../controllers/paystackController");
+const { authenticate } = require("../middleware/auth");
 
 /**
- * @route   GET /api/payments
- * @desc    Get all payments for authenticated user
+ * @route   POST /api/paystack/initialize
+ * @desc    Initialize Paystack payment and get public_key + reference
  * @access  Private
- * @query   status, limit, offset
- */
-router.get("/", authenticate, paymentController.getUserPayments);
-
-/**
- * @route   GET /api/payments/:id
- * @desc    Get single payment by ID
- * @access  Private
- */
-router.get("/:id", authenticate, paymentController.getPaymentById);
-
-/**
- * @route   GET /api/payments/order/:orderId
- * @desc    Get payment by order ID
- * @access  Private
- */
-router.get(
-  "/order/:orderId",
-  authenticate,
-  paymentController.getPaymentByOrderId,
-);
-
-// ========================================
-// ADMIN ROUTES
-// ========================================
-
-/**
- * @route   GET /api/admin/payments
- * @desc    Get all payments (Admin)
- * @access  Private/Admin
- * @query   status, payment_method, limit, offset, search
- */
-router.get(
-  "/admin/all",
-  authenticate,
-  authorize("admin"),
-  paymentController.getAllPayments,
-);
-
-/**
- * @route   POST /api/admin/payments/:id/verify
- * @desc    Verify Paystack payment manually
- * @access  Private/Admin
  */
 router.post(
-  "/admin/:id/verify",
+  "/initialize",
   authenticate,
-  authorize("admin"),
-  paymentController.verifyPayment,
+  paystackController.initializePayment.bind(paystackController),
 );
 
 /**
- * @route   PUT /api/admin/payments/:id/status
- * @desc    Update payment status
- * @access  Private/Admin
- * @body    { status, notes? }
- */
-router.put(
-  "/admin/:id/status",
-  authenticate,
-  authorize("admin"),
-  paymentController.updatePaymentStatus,
-);
-
-/**
- * @route   GET /api/admin/payments/stats
- * @desc    Get payment statistics
- * @access  Private/Admin
- * @query   start_date?, end_date?
+ * @route   GET /api/paystack/verify/:reference
+ * @desc    Verify Paystack payment after popup callback
+ * @access  Private
  */
 router.get(
-  "/admin/stats",
+  "/verify/:reference",
   authenticate,
-  authorize("admin"),
-  paymentController.getPaymentStats,
+  paystackController.verifyPayment.bind(paystackController),
 );
 
 /**
- * @route   POST /api/admin/payments/:id/refund
- * @desc    Process refund
- * @access  Private/Admin
- * @body    { reason, amount? }
+ * @route   POST /api/paystack/webhook
+ * @desc    Paystack webhook (no auth — verified by signature)
+ * @access  Public
  */
 router.post(
-  "/admin/:id/refund",
+  "/webhook",
+  paystackController.handleWebhook.bind(paystackController),
+);
+
+/**
+ * @route   GET /api/paystack/banks
+ * @desc    Get list of Nigerian banks
+ * @access  Public
+ */
+router.get("/banks", paystackController.getBanks.bind(paystackController));
+
+/**
+ * @route   POST /api/paystack/verify-account
+ * @desc    Verify bank account number
+ * @access  Private
+ */
+router.post(
+  "/verify-account",
   authenticate,
-  authorize("admin"),
-  paymentController.refundPayment,
+  paystackController.verifyAccountNumber.bind(paystackController),
 );
 
 module.exports = router;
