@@ -1,57 +1,104 @@
-// src/routes/paystack.js
+// src/routes/payments.js
 const express = require("express");
 const router = express.Router();
-const paystackController = require("../controllers/PaystackController");
-const { authenticate } = require("../middleware/auth");
+const paymentController = require("../controllers/paymentController");
+const { authenticate, authorize } = require("../middleware/auth");
+
+// ── ADMIN ROUTES (must come before /:id wildcard) ─────────────────────────
 
 /**
- * @route   POST /api/paystack/initialize
- * @desc    Initialize Paystack payment and get public_key + reference
- * @access  Private
+ * @route   GET /api/payments/admin/stats
+ * @desc    Get payment statistics
+ * @access  Private/Admin
  */
-router.post(
-  "/initialize",
+router.get(
+  "/admin/stats",
   authenticate,
-  paystackController.initializePayment.bind(paystackController),
+  authorize("admin"),
+  paymentController.getPaymentStats.bind(paymentController),
 );
 
 /**
- * @route   GET /api/paystack/verify/:reference
- * @desc    Verify Paystack payment after popup callback
+ * @route   GET /api/payments/admin/all
+ * @desc    Get all payments (admin view)
+ * @access  Private/Admin
+ */
+router.get(
+  "/admin/all",
+  authenticate,
+  authorize("admin"),
+  paymentController.getAllPayments.bind(paymentController),
+);
+
+/**
+ * @route   POST /api/payments/admin/:id/verify
+ * @desc    Manually verify a Paystack payment
+ * @access  Private/Admin
+ */
+router.post(
+  "/admin/:id/verify",
+  authenticate,
+  authorize("admin"),
+  paymentController.verifyPayment.bind(paymentController),
+);
+
+/**
+ * @route   PUT /api/payments/admin/:id/status
+ * @desc    Update payment status manually
+ * @access  Private/Admin
+ */
+router.put(
+  "/admin/:id/status",
+  authenticate,
+  authorize("admin"),
+  paymentController.updatePaymentStatus.bind(paymentController),
+);
+
+/**
+ * @route   POST /api/payments/admin/:id/refund
+ * @desc    Process a refund
+ * @access  Private/Admin
+ */
+router.post(
+  "/admin/:id/refund",
+  authenticate,
+  authorize("admin"),
+  paymentController.refundPayment.bind(paymentController),
+);
+
+// ── USER ROUTES ────────────────────────────────────────────────────────────
+
+/**
+ * @route   GET /api/payments
+ * @desc    Get all payments for authenticated user
  * @access  Private
  */
 router.get(
-  "/verify/:reference",
+  "/",
   authenticate,
-  paystackController.verifyPayment.bind(paystackController),
+  paymentController.getUserPayments.bind(paymentController),
 );
 
 /**
- * @route   POST /api/paystack/webhook
- * @desc    Paystack webhook (no auth — verified by signature)
- * @access  Public
- */
-router.post(
-  "/webhook",
-  paystackController.handleWebhook.bind(paystackController),
-);
-
-/**
- * @route   GET /api/paystack/banks
- * @desc    Get list of Nigerian banks
- * @access  Public
- */
-router.get("/banks", paystackController.getBanks.bind(paystackController));
-
-/**
- * @route   POST /api/paystack/verify-account
- * @desc    Verify bank account number
+ * @route   GET /api/payments/order/:orderId
+ * @desc    Get payment by order ID
  * @access  Private
  */
-router.post(
-  "/verify-account",
+router.get(
+  "/order/:orderId",
   authenticate,
-  paystackController.verifyAccountNumber.bind(paystackController),
+  paymentController.getPaymentByOrderId.bind(paymentController),
+);
+
+/**
+ * @route   GET /api/payments/:id
+ * @desc    Get single payment by ID
+ * @access  Private
+ */
+router.get(
+  "/:id",
+  authenticate,
+  paymentController.getPaymentById.bind(paymentController),
 );
 
 module.exports = router;
