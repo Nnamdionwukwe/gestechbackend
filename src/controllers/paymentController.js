@@ -1,6 +1,6 @@
+// src/controllers/paymentController.js
 const db = require("../config/database");
 const axios = require("axios");
-const crypto = require("crypto");
 
 class PaymentController {
   /**
@@ -14,10 +14,7 @@ class PaymentController {
       const { status, limit = 10, offset = 0 } = req.query;
 
       let query = `
-        SELECT 
-          p.*,
-          o.order_number,
-          o.total as order_total
+        SELECT p.*, o.order_number, o.total as order_total
         FROM payments p
         JOIN orders o ON p.order_id = o.id
         WHERE p.user_id = $1
@@ -29,15 +26,11 @@ class PaymentController {
         params.push(status);
       }
 
-      query += `
-        ORDER BY p.created_at DESC
-        LIMIT $${params.length + 1} OFFSET $${params.length + 2}
-      `;
-      params.push(limit, offset);
+      query += ` ORDER BY p.created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+      params.push(parseInt(limit), parseInt(offset));
 
       const result = await client.query(query, params);
 
-      // Get total count
       const countQuery = status
         ? "SELECT COUNT(*) FROM payments WHERE user_id = $1 AND status = $2"
         : "SELECT COUNT(*) FROM payments WHERE user_id = $1";
@@ -47,10 +40,10 @@ class PaymentController {
       return res.json({
         success: true,
         data: {
-          payments: result.rows.map((payment) => ({
-            ...payment,
-            amount: parseFloat(payment.amount),
-            order_total: parseFloat(payment.order_total),
+          payments: result.rows.map((p) => ({
+            ...p,
+            amount: parseFloat(p.amount),
+            order_total: parseFloat(p.order_total),
           })),
           pagination: {
             total: parseInt(countResult.rows[0].count),
@@ -61,11 +54,13 @@ class PaymentController {
       });
     } catch (error) {
       console.error("Get user payments error:", error);
-      return res.status(500).json({
-        success: false,
-        error: "Failed to fetch payments",
-        message: error.message,
-      });
+      return res
+        .status(500)
+        .json({
+          success: false,
+          error: "Failed to fetch payments",
+          message: error.message,
+        });
     } finally {
       client.release();
     }
@@ -82,25 +77,17 @@ class PaymentController {
       const userId = req.user.id;
 
       const result = await client.query(
-        `
-        SELECT 
-          p.*,
-          o.order_number,
-          o.total as order_total,
-          o.order_status
-        FROM payments p
-        JOIN orders o ON p.order_id = o.id
-        WHERE p.id = $1 AND p.user_id = $2
-      `,
+        `SELECT p.*, o.order_number, o.total as order_total, o.order_status
+         FROM payments p
+         JOIN orders o ON p.order_id = o.id
+         WHERE p.id = $1 AND p.user_id = $2`,
         [id, userId],
       );
 
-      if (result.rows.length === 0) {
-        return res.status(404).json({
-          success: false,
-          error: "Payment not found",
-        });
-      }
+      if (result.rows.length === 0)
+        return res
+          .status(404)
+          .json({ success: false, error: "Payment not found" });
 
       return res.json({
         success: true,
@@ -112,11 +99,13 @@ class PaymentController {
       });
     } catch (error) {
       console.error("Get payment by ID error:", error);
-      return res.status(500).json({
-        success: false,
-        error: "Failed to fetch payment",
-        message: error.message,
-      });
+      return res
+        .status(500)
+        .json({
+          success: false,
+          error: "Failed to fetch payment",
+          message: error.message,
+        });
     } finally {
       client.release();
     }
@@ -133,38 +122,31 @@ class PaymentController {
       const userId = req.user.id;
 
       const result = await client.query(
-        `
-        SELECT 
-          p.*,
-          o.order_number
-        FROM payments p
-        JOIN orders o ON p.order_id = o.id
-        WHERE p.order_id = $1 AND p.user_id = $2
-      `,
+        `SELECT p.*, o.order_number
+         FROM payments p
+         JOIN orders o ON p.order_id = o.id
+         WHERE p.order_id = $1 AND p.user_id = $2`,
         [orderId, userId],
       );
 
-      if (result.rows.length === 0) {
-        return res.status(404).json({
-          success: false,
-          error: "Payment not found for this order",
-        });
-      }
+      if (result.rows.length === 0)
+        return res
+          .status(404)
+          .json({ success: false, error: "Payment not found for this order" });
 
       return res.json({
         success: true,
-        data: {
-          ...result.rows[0],
-          amount: parseFloat(result.rows[0].amount),
-        },
+        data: { ...result.rows[0], amount: parseFloat(result.rows[0].amount) },
       });
     } catch (error) {
       console.error("Get payment by order ID error:", error);
-      return res.status(500).json({
-        success: false,
-        error: "Failed to fetch payment",
-        message: error.message,
-      });
+      return res
+        .status(500)
+        .json({
+          success: false,
+          error: "Failed to fetch payment",
+          message: error.message,
+        });
     } finally {
       client.release();
     }
@@ -172,7 +154,7 @@ class PaymentController {
 
   /**
    * Get all payments (Admin)
-   * GET /api/admin/payments
+   * GET /api/payments/admin/all
    */
   async getAllPayments(req, res) {
     const client = await db.pool.connect();
@@ -186,11 +168,7 @@ class PaymentController {
       } = req.query;
 
       let query = `
-        SELECT 
-          p.*,
-          o.order_number,
-          u.email as user_email,
-          u.full_name as user_name
+        SELECT p.*, o.order_number, u.email as user_email, u.full_name as user_name
         FROM payments p
         JOIN orders o ON p.order_id = o.id
         JOIN users u ON p.user_id = u.id
@@ -202,37 +180,34 @@ class PaymentController {
         params.push(status);
         query += ` AND p.status = $${params.length}`;
       }
-
       if (payment_method) {
         params.push(payment_method);
         query += ` AND p.payment_method = $${params.length}`;
       }
-
       if (search) {
         params.push(`%${search}%`);
-        query += ` AND (o.order_number LIKE $${params.length} OR p.transaction_reference LIKE $${params.length} OR u.email LIKE $${params.length})`;
+        query += ` AND (o.order_number ILIKE $${params.length} OR p.transaction_reference ILIKE $${params.length} OR u.email ILIKE $${params.length})`;
       }
 
-      query += `
-        ORDER BY p.created_at DESC
-        LIMIT $${params.length + 1} OFFSET $${params.length + 2}
-      `;
-      params.push(limit, offset);
+      query += ` ORDER BY p.created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+      params.push(parseInt(limit), parseInt(offset));
 
       const result = await client.query(query, params);
 
-      // Get total count
-      let countQuery = "SELECT COUNT(*) FROM payments p WHERE 1=1";
+      let countQuery =
+        "SELECT COUNT(*) FROM payments p JOIN orders o ON p.order_id = o.id JOIN users u ON p.user_id = u.id WHERE 1=1";
       const countParams = [];
-
       if (status) {
         countParams.push(status);
         countQuery += ` AND p.status = $${countParams.length}`;
       }
-
       if (payment_method) {
         countParams.push(payment_method);
         countQuery += ` AND p.payment_method = $${countParams.length}`;
+      }
+      if (search) {
+        countParams.push(`%${search}%`);
+        countQuery += ` AND (o.order_number ILIKE $${countParams.length} OR u.email ILIKE $${countParams.length})`;
       }
 
       const countResult = await client.query(countQuery, countParams);
@@ -240,9 +215,9 @@ class PaymentController {
       return res.json({
         success: true,
         data: {
-          payments: result.rows.map((payment) => ({
-            ...payment,
-            amount: parseFloat(payment.amount),
+          payments: result.rows.map((p) => ({
+            ...p,
+            amount: parseFloat(p.amount),
           })),
           pagination: {
             total: parseInt(countResult.rows[0].count),
@@ -253,11 +228,13 @@ class PaymentController {
       });
     } catch (error) {
       console.error("Get all payments error:", error);
-      return res.status(500).json({
-        success: false,
-        error: "Failed to fetch payments",
-        message: error.message,
-      });
+      return res
+        .status(500)
+        .json({
+          success: false,
+          error: "Failed to fetch payments",
+          message: error.message,
+        });
     } finally {
       client.release();
     }
@@ -265,99 +242,83 @@ class PaymentController {
 
   /**
    * Verify Paystack payment manually (Admin)
-   * POST /api/admin/payments/:id/verify
+   * POST /api/payments/admin/:id/verify
    */
   async verifyPayment(req, res) {
     const client = await db.pool.connect();
     try {
       await client.query("BEGIN");
-
       const { id } = req.params;
 
-      // Get payment
       const paymentResult = await client.query(
         "SELECT * FROM payments WHERE id = $1",
         [id],
       );
-
       if (paymentResult.rows.length === 0) {
         await client.query("ROLLBACK");
-        return res.status(404).json({
-          success: false,
-          error: "Payment not found",
-        });
+        return res
+          .status(404)
+          .json({ success: false, error: "Payment not found" });
       }
 
       const payment = paymentResult.rows[0];
 
-      if (payment.payment_method === "paystack") {
-        // Verify with Paystack
-        const paystackResponse = await axios.get(
-          `https://api.paystack.co/transaction/verify/${payment.paystack_reference}`,
-          {
-            headers: {
-              Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-            },
-          },
-        );
-
-        const transactionData = paystackResponse.data.data;
-
-        if (transactionData.status === "success") {
-          // Update payment
-          await client.query(
-            `
-            UPDATE payments 
-            SET status = 'completed', 
-                paid_at = CURRENT_TIMESTAMP,
-                paystack_data = $1
-            WHERE id = $2
-          `,
-            [JSON.stringify(transactionData), id],
-          );
-
-          // Update order
-          await client.query(
-            `
-            UPDATE orders 
-            SET payment_status = 'paid',
-                order_status = 'processing',
-                paid_at = CURRENT_TIMESTAMP
-            WHERE id = $1
-          `,
-            [payment.order_id],
-          );
-
-          await client.query("COMMIT");
-
-          return res.json({
-            success: true,
-            message: "Payment verified successfully",
-            data: transactionData,
-          });
-        } else {
-          await client.query("ROLLBACK");
-          return res.status(400).json({
+      if (payment.payment_method !== "paystack") {
+        await client.query("ROLLBACK");
+        return res
+          .status(400)
+          .json({
             success: false,
-            error: "Payment verification failed",
-            data: transactionData,
+            error: "Only Paystack payments can be verified automatically",
           });
-        }
+      }
+
+      const paystackRes = await axios.get(
+        `https://api.paystack.co/transaction/verify/${payment.paystack_reference}`,
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+          },
+        },
+      );
+
+      const txData = paystackRes.data.data;
+
+      if (txData.status === "success") {
+        await client.query(
+          `UPDATE payments SET status = 'completed', paid_at = CURRENT_TIMESTAMP, paystack_data = $1 WHERE id = $2`,
+          [JSON.stringify(txData), id],
+        );
+        await client.query(
+          `UPDATE orders SET payment_status = 'paid', order_status = 'processing', paid_at = CURRENT_TIMESTAMP WHERE id = $1`,
+          [payment.order_id],
+        );
+        await client.query("COMMIT");
+        return res.json({
+          success: true,
+          message: "Payment verified successfully",
+          data: txData,
+        });
       } else {
         await client.query("ROLLBACK");
-        return res.status(400).json({
-          success: false,
-          error: "Only Paystack payments can be verified automatically",
-        });
+        return res
+          .status(400)
+          .json({
+            success: false,
+            error: "Payment verification failed",
+            data: txData,
+          });
       }
     } catch (error) {
       await client.query("ROLLBACK");
       console.error("Verify payment error:", error);
-      return res.status(500).json({
-        success: false,
-        error: "Failed to verify payment",
-        message: error.response?.data?.message || error.message,
-      });
+      return res
+        .status(500)
+        .json({
+          success: false,
+          error: "Failed to verify payment",
+          message: error.response?.data?.message || error.message,
+        });
     } finally {
       client.release();
     }
@@ -365,7 +326,10 @@ class PaymentController {
 
   /**
    * Update payment status (Admin)
-   * PUT /api/admin/payments/:id/status
+   * PUT /api/payments/admin/:id/status
+   *
+   * FIX: Replaced CASE $1 WHEN ... with explicit cast ::varchar to resolve
+   * "inconsistent types deduced for parameter $1" (text vs varchar) error.
    */
   async updatePaymentStatus(req, res) {
     const client = await db.pool.connect();
@@ -375,77 +339,69 @@ class PaymentController {
       const { id } = req.params;
       const { status, notes } = req.body;
 
-      // Validate status
       const validStatuses = ["pending", "completed", "failed", "refunded"];
-      if (!validStatuses.includes(status)) {
+      if (!status || !validStatuses.includes(status)) {
         await client.query("ROLLBACK");
-        return res.status(400).json({
-          success: false,
-          error: "Invalid payment status",
-        });
+        return res
+          .status(400)
+          .json({
+            success: false,
+            error: `Status must be one of: ${validStatuses.join(", ")}`,
+          });
       }
 
-      // Get payment
       const paymentResult = await client.query(
         "SELECT * FROM payments WHERE id = $1",
         [id],
       );
-
       if (paymentResult.rows.length === 0) {
         await client.query("ROLLBACK");
-        return res.status(404).json({
-          success: false,
-          error: "Payment not found",
-        });
+        return res
+          .status(404)
+          .json({ success: false, error: "Payment not found" });
       }
 
       const payment = paymentResult.rows[0];
 
-      // Update payment
-      const updateFields = ["status = $1"];
-      const params = [status, id];
-      let paramCount = 2;
+      // Build update cleanly — no CASE with $1 to avoid type inference issues
+      const setParts = ["status = $1::varchar", "updated_at = NOW()"];
+      const params = [status];
 
       if (status === "completed") {
-        updateFields.push("paid_at = CURRENT_TIMESTAMP");
+        setParts.push("paid_at = COALESCE(paid_at, NOW())");
       }
-
       if (notes) {
-        params.splice(params.length - 1, 0, notes);
-        updateFields.push(`failure_reason = $${paramCount++}`);
+        params.push(notes);
+        setParts.push(`failure_reason = $${params.length}::text`);
       }
 
+      params.push(id);
       await client.query(
-        `UPDATE payments SET ${updateFields.join(", ")} WHERE id = $${paramCount}`,
+        `UPDATE payments SET ${setParts.join(", ")} WHERE id = $${params.length}`,
         params,
       );
 
-      // Update order payment status
-      let orderPaymentStatus = "pending";
-      if (status === "completed") {
-        orderPaymentStatus = "paid";
-      } else if (status === "failed") {
-        orderPaymentStatus = "failed";
-      } else if (status === "refunded") {
-        orderPaymentStatus = "refunded";
+      // Map payment status → order statuses (avoid CASE $1 WHEN pattern)
+      const orderPaymentStatus =
+        { completed: "paid", failed: "failed", refunded: "refunded" }[status] ||
+        "pending";
+      const orderStatus = { completed: "processing", failed: "cancelled" }[
+        status
+      ];
+
+      if (orderStatus) {
+        await client.query(
+          `UPDATE orders SET payment_status = $1::varchar, order_status = $2::varchar WHERE id = $3`,
+          [orderPaymentStatus, orderStatus, payment.order_id],
+        );
+      } else {
+        await client.query(
+          `UPDATE orders SET payment_status = $1::varchar WHERE id = $2`,
+          [orderPaymentStatus, payment.order_id],
+        );
       }
 
-      await client.query(
-        `
-        UPDATE orders 
-        SET payment_status = $1,
-            order_status = CASE 
-              WHEN $1 = 'paid' THEN 'processing'
-              WHEN $1 = 'failed' THEN 'cancelled'
-              ELSE order_status
-            END
-        WHERE id = $2
-      `,
-        [orderPaymentStatus, payment.order_id],
-      );
-
       await client.query("COMMIT");
-
       return res.json({
         success: true,
         message: "Payment status updated successfully",
@@ -453,11 +409,13 @@ class PaymentController {
     } catch (error) {
       await client.query("ROLLBACK");
       console.error("Update payment status error:", error);
-      return res.status(500).json({
-        success: false,
-        error: "Failed to update payment status",
-        message: error.message,
-      });
+      return res
+        .status(500)
+        .json({
+          success: false,
+          error: "Failed to update payment status",
+          message: error.message,
+        });
     } finally {
       client.release();
     }
@@ -465,94 +423,94 @@ class PaymentController {
 
   /**
    * Get payment statistics (Admin)
-   * GET /api/admin/payments/stats
+   * GET /api/payments/admin/stats
    */
   async getPaymentStats(req, res) {
     const client = await db.pool.connect();
     try {
       const { start_date, end_date } = req.query;
-
-      let dateFilter = "";
       const params = [];
+      let dateFilter = "";
 
       if (start_date && end_date) {
         params.push(start_date, end_date);
-        dateFilter = " WHERE created_at BETWEEN $1 AND $2";
+        dateFilter = "WHERE created_at BETWEEN $1 AND $2";
       }
 
-      // Overall stats
       const statsResult = await client.query(
-        `
-        SELECT 
-          COUNT(*) as total_payments,
-          SUM(CASE WHEN status = 'completed' THEN amount ELSE 0 END) as total_revenue,
-          COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending_payments,
-          COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed_payments,
-          COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed_payments,
-          COUNT(CASE WHEN status = 'refunded' THEN 1 END) as refunded_payments,
-          AVG(CASE WHEN status = 'completed' THEN amount END) as average_payment_value
-        FROM payments
-        ${dateFilter}
-      `,
+        `SELECT
+           COUNT(*)                                                              AS total_payments,
+           COALESCE(SUM(amount) FILTER (WHERE status = 'completed'), 0)         AS total_revenue,
+           COUNT(*) FILTER (WHERE status = 'pending')                           AS pending_payments,
+           COUNT(*) FILTER (WHERE status = 'completed')                         AS completed_payments,
+           COUNT(*) FILTER (WHERE status = 'failed')                            AS failed_payments,
+           COUNT(*) FILTER (WHERE status = 'refunded')                          AS refunded_payments,
+           COALESCE(AVG(amount) FILTER (WHERE status = 'completed'), 0)         AS average_payment_value
+         FROM payments ${dateFilter}`,
         params,
       );
 
-      // Payment method breakdown
       const paymentMethodResult = await client.query(
-        `
-        SELECT 
-          payment_method,
-          COUNT(*) as count,
-          SUM(CASE WHEN status = 'completed' THEN amount ELSE 0 END) as total_amount,
-          COUNT(CASE WHEN status = 'completed' THEN 1 END) as successful_count,
-          COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed_count
-        FROM payments
-        ${dateFilter}
-        GROUP BY payment_method
-      `,
+        `SELECT
+           payment_method,
+           COUNT(*)                                                              AS count,
+           COALESCE(SUM(amount) FILTER (WHERE status = 'completed'), 0)         AS total_amount,
+           COUNT(*) FILTER (WHERE status = 'completed')                         AS successful_count,
+           COUNT(*) FILTER (WHERE status = 'failed')                            AS failed_count
+         FROM payments ${dateFilter}
+         GROUP BY payment_method`,
         params,
       );
 
-      // Daily revenue (last 30 days)
-      const dailyRevenueResult = await client.query(
-        `
-        SELECT 
-          DATE(created_at) as date,
-          SUM(CASE WHEN status = 'completed' THEN amount ELSE 0 END) as revenue,
-          COUNT(*) as payment_count
+      const dailyRevenueResult = await client.query(`
+        SELECT
+          DATE(created_at)                                                        AS date,
+          COALESCE(SUM(amount) FILTER (WHERE status = 'completed'), 0)           AS revenue,
+          COUNT(*)                                                                AS payment_count
         FROM payments
         WHERE created_at >= CURRENT_DATE - INTERVAL '30 days'
         GROUP BY DATE(created_at)
         ORDER BY date DESC
-      `,
-      );
+      `);
 
+      const row = statsResult.rows[0];
       return res.json({
         success: true,
         data: {
           stats: {
-            ...statsResult.rows[0],
-            total_revenue: parseFloat(statsResult.rows[0].total_revenue) || 0,
-            average_payment_value:
-              parseFloat(statsResult.rows[0].average_payment_value) || 0,
+            total_payments: parseInt(row.total_payments),
+            total_revenue: parseFloat(row.total_revenue),
+            pending_payments: parseInt(row.pending_payments),
+            completed_payments: parseInt(row.completed_payments),
+            failed_payments: parseInt(row.failed_payments),
+            refunded_payments: parseInt(row.refunded_payments),
+            average_payment_value: parseFloat(
+              parseFloat(row.average_payment_value).toFixed(2),
+            ),
           },
           payment_methods: paymentMethodResult.rows.map((pm) => ({
             ...pm,
+            count: parseInt(pm.count),
             total_amount: parseFloat(pm.total_amount),
+            successful_count: parseInt(pm.successful_count),
+            failed_count: parseInt(pm.failed_count),
           })),
           daily_revenue: dailyRevenueResult.rows.map((dr) => ({
             ...dr,
             revenue: parseFloat(dr.revenue),
+            payment_count: parseInt(dr.payment_count),
           })),
         },
       });
     } catch (error) {
       console.error("Get payment stats error:", error);
-      return res.status(500).json({
-        success: false,
-        error: "Failed to fetch payment statistics",
-        message: error.message,
-      });
+      return res
+        .status(500)
+        .json({
+          success: false,
+          error: "Failed to fetch payment statistics",
+          message: error.message,
+        });
     } finally {
       client.release();
     }
@@ -560,7 +518,7 @@ class PaymentController {
 
   /**
    * Process refund (Admin)
-   * POST /api/admin/payments/:id/refund
+   * POST /api/payments/admin/:id/refund
    */
   async refundPayment(req, res) {
     const client = await db.pool.connect();
@@ -570,51 +528,51 @@ class PaymentController {
       const { id } = req.params;
       const { reason, amount } = req.body;
 
-      // Get payment
       const paymentResult = await client.query(
         "SELECT * FROM payments WHERE id = $1",
         [id],
       );
-
       if (paymentResult.rows.length === 0) {
         await client.query("ROLLBACK");
-        return res.status(404).json({
-          success: false,
-          error: "Payment not found",
-        });
+        return res
+          .status(404)
+          .json({ success: false, error: "Payment not found" });
       }
 
       const payment = paymentResult.rows[0];
 
       if (payment.status !== "completed") {
         await client.query("ROLLBACK");
-        return res.status(400).json({
-          success: false,
-          error: "Only completed payments can be refunded",
-        });
+        return res
+          .status(400)
+          .json({
+            success: false,
+            error: "Only completed payments can be refunded",
+          });
       }
 
       const refundAmount = amount || payment.amount;
-
       if (parseFloat(refundAmount) > parseFloat(payment.amount)) {
         await client.query("ROLLBACK");
-        return res.status(400).json({
-          success: false,
-          error: "Refund amount cannot exceed payment amount",
-        });
+        return res
+          .status(400)
+          .json({
+            success: false,
+            error: "Refund amount cannot exceed payment amount",
+          });
       }
 
-      // If Paystack payment, initiate refund through Paystack
+      // Attempt Paystack refund (non-fatal if it fails)
       if (
         payment.payment_method === "paystack" &&
         payment.transaction_reference
       ) {
         try {
-          const paystackResponse = await axios.post(
+          await axios.post(
             "https://api.paystack.co/refund",
             {
               transaction: payment.transaction_reference,
-              amount: Math.round(parseFloat(refundAmount) * 100), // Convert to kobo
+              amount: Math.round(parseFloat(refundAmount) * 100),
             },
             {
               headers: {
@@ -623,67 +581,53 @@ class PaymentController {
               },
             },
           );
-
-          console.log("Paystack refund response:", paystackResponse.data);
         } catch (paystackError) {
-          console.error("Paystack refund error:", paystackError.response?.data);
-          // Continue with manual refund even if Paystack fails
+          console.error(
+            "Paystack refund error (non-fatal):",
+            paystackError.response?.data,
+          );
         }
       }
 
-      // Update payment status
       await client.query(
-        `
-        UPDATE payments 
-        SET status = 'refunded',
-            failure_reason = $1
-        WHERE id = $2
-      `,
+        `UPDATE payments SET status = 'refunded', failure_reason = $1 WHERE id = $2`,
         [reason || "Refund processed", id],
       );
-
-      // Update order
       await client.query(
-        `
-        UPDATE orders 
-        SET payment_status = 'refunded',
-            order_status = 'cancelled'
-        WHERE id = $1
-      `,
+        `UPDATE orders SET payment_status = 'refunded', order_status = 'cancelled' WHERE id = $1`,
         [payment.order_id],
       );
 
       // Restore product stock
-      const itemsResult = await client.query(
-        "SELECT product_id, quantity FROM order_items WHERE order_id = $1",
+      const items = await client.query(
+        "SELECT product_id, quantity FROM order_items WHERE order_id = $1 AND item_type = 'product'",
         [payment.order_id],
       );
-
-      for (const item of itemsResult.rows) {
-        await client.query(
-          "UPDATE products SET stock = stock + $1 WHERE id = $2",
-          [item.quantity, item.product_id],
-        );
+      for (const item of items.rows) {
+        if (item.product_id) {
+          await client.query(
+            "UPDATE products SET stock = stock + $1 WHERE id = $2",
+            [item.quantity, item.product_id],
+          );
+        }
       }
 
       await client.query("COMMIT");
-
       return res.json({
         success: true,
         message: "Refund processed successfully",
-        data: {
-          refund_amount: parseFloat(refundAmount),
-          reason,
-        },
+        data: { refund_amount: parseFloat(refundAmount), reason },
       });
     } catch (error) {
       await client.query("ROLLBACK");
       console.error("Refund payment error:", error);
-      return res.status(500).json({
-        success: false,
-        error: "Failed to process refund",
-        message: error.message,
-      });
+      return res
+        .status(500)
+        .json({
+          success: false,
+          error: "Failed to process refund",
+          message: error.message,
+        });
     } finally {
       client.release();
     }
