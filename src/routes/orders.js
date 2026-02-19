@@ -14,7 +14,11 @@ const { authenticate, authorize } = require("../middleware/auth");
  * @access  Private
  * @body    { shippingAddress, billingAddress?, paymentMethod, notes? }
  */
-router.post("/", authenticate, orderController.createOrder);
+router.post(
+  "/",
+  authenticate,
+  orderController.createOrder.bind(orderController),
+);
 
 /**
  * @route   GET /api/orders
@@ -22,37 +26,35 @@ router.post("/", authenticate, orderController.createOrder);
  * @access  Private
  * @query   status, limit, offset
  */
-router.get("/", authenticate, orderController.getUserOrders);
-
-/**
- * @route   GET /api/orders/:id
- * @desc    Get single order by ID
- * @access  Private
- */
-router.get("/:id", authenticate, orderController.getOrderById);
+router.get(
+  "/",
+  authenticate,
+  orderController.getUserOrders.bind(orderController),
+);
 
 /**
  * @route   GET /api/orders/number/:orderNumber
- * @desc    Get order by order number
+ * @desc    Get order by order number (must be before /:id to avoid conflict)
  * @access  Private
  */
 router.get(
   "/number/:orderNumber",
   authenticate,
-  orderController.getOrderByNumber,
+  orderController.getOrderByNumber.bind(orderController),
 );
 
 /**
- * @route   PUT /api/orders/:id/cancel
- * @desc    Cancel order
- * @access  Private
- * @body    { reason }
+ * @route   GET /api/orders/admin/stats
+ * @desc    Get order statistics (Admin)
+ * @access  Private/Admin
+ * @query   start_date?, end_date?
  */
-router.put("/:id/cancel", authenticate, orderController.cancelOrder);
-
-// ========================================
-// ADMIN ROUTES
-// ========================================
+router.get(
+  "/admin/stats",
+  authenticate,
+  authorize("admin"),
+  orderController.getOrderStats.bind(orderController),
+);
 
 /**
  * @route   GET /api/admin/orders
@@ -64,7 +66,7 @@ router.get(
   "/admin/all",
   authenticate,
   authorize("admin"),
-  orderController.getAllOrders,
+  orderController.getAllOrders.bind(orderController),
 );
 
 /**
@@ -77,20 +79,30 @@ router.put(
   "/admin/:id/status",
   authenticate,
   authorize("admin"),
-  orderController.updateOrderStatus,
+  orderController.updateOrderStatus.bind(orderController),
 );
 
 /**
- * @route   GET /api/admin/orders/stats
- * @desc    Get order statistics
- * @access  Private/Admin
- * @query   start_date?, end_date?
+ * @route   GET /api/orders/:id
+ * @desc    Get single order by ID (must be after specific routes)
+ * @access  Private
  */
 router.get(
-  "/admin/stats",
+  "/:id",
   authenticate,
-  authorize("admin"),
-  orderController.getOrderStats,
+  orderController.getOrderById.bind(orderController),
+);
+
+/**
+ * @route   PUT /api/orders/:id/cancel
+ * @desc    Cancel order
+ * @access  Private
+ * @body    { reason }
+ */
+router.put(
+  "/:id/cancel",
+  authenticate,
+  orderController.cancelOrder.bind(orderController),
 );
 
 module.exports = router;
