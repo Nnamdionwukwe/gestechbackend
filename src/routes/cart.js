@@ -12,7 +12,7 @@ router.use(authenticate);
  * @desc    Get user's cart
  * @access  Private
  */
-router.get("/", cartController.getCart);
+router.get("/", cartController.getCart.bind(cartController));
 
 /**
  * @route   POST /api/cart/add
@@ -20,7 +20,7 @@ router.get("/", cartController.getCart);
  * @access  Private
  * @body    { productId?, serviceVariantId?, quantity }
  */
-router.post("/add", cartController.addToCart);
+router.post("/add", cartController.addToCart.bind(cartController));
 
 /**
  * @route   PUT /api/cart/update
@@ -28,7 +28,7 @@ router.post("/add", cartController.addToCart);
  * @access  Private
  * @body    { cartItemId, quantity }
  */
-router.put("/update", cartController.updateCartItem);
+router.put("/update", cartController.updateCartItem.bind(cartController));
 
 /**
  * @route   DELETE /api/cart/remove/:cartItemId
@@ -36,13 +36,16 @@ router.put("/update", cartController.updateCartItem);
  * @access  Private
  * @param   cartItemId - The cart item ID to remove
  */
-router.delete("/remove/:cartItemId", cartController.removeFromCart);
+router.delete(
+  "/remove/:cartItemId",
+  cartController.removeFromCart.bind(cartController),
+);
 
 /**
  * @route   DELETE /api/cart/clear
  * @desc    Clear entire cart
  * @access  Private
  */
-router.delete("/clear", cartController.clearCart);
+router.delete("/clear", cartController.clearCart.bind(cartController));
 
 module.exports = router;
