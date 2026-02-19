@@ -1029,6 +1029,70 @@ exports.deleteSubscriber = async (req, res) => {
   }
 };
 
+// Add this method to src/controllers/adminController.js
+
+// Get all projects (Admin)
+exports.getAllProjects = async (req, res) => {
+  try {
+    const { category, is_published, page = 1, limit = 50 } = req.query;
+    const offset = (page - 1) * limit;
+
+    let query = "SELECT * FROM portfolio_projects WHERE 1=1";
+    const params = [];
+
+    if (category) {
+      params.push(category);
+      query += ` AND category = $${params.length}`;
+    }
+
+    if (is_published !== undefined) {
+      params.push(is_published === "true");
+      query += ` AND is_published = $${params.length}`;
+    }
+
+    query += ` ORDER BY display_order ASC, created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+    params.push(parseInt(limit), parseInt(offset));
+
+    const projects = await db.query(query, params);
+
+    // Get total count
+    let countQuery =
+      "SELECT COUNT(*) as total FROM portfolio_projects WHERE 1=1";
+    const countParams = [];
+
+    if (category) {
+      countParams.push(category);
+      countQuery += ` AND category = $${countParams.length}`;
+    }
+
+    if (is_published !== undefined) {
+      countParams.push(is_published === "true");
+      countQuery += ` AND is_published = $${countParams.length}`;
+    }
+
+    const total = await db.query(countQuery, countParams);
+
+    res.json({
+      success: true,
+      data: {
+        projects: projects.rows,
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total: parseInt(total.rows[0].total),
+          pages: Math.ceil(total.rows[0].total / limit),
+        },
+      },
+    });
+  } catch (error) {
+    console.error("Get all projects error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to fetch projects",
+    });
+  }
+};
+
 // ==================== DASHBOARD STATS ====================
 
 // Get dashboard statistics

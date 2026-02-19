@@ -183,4 +183,6 @@ router.put("/subscribers/:id/unsubscribe", adminController.unsubscribeUser);
  */
 router.delete("/subscribers/:id", adminController.deleteSubscriber);
 
+router.get("/projects", adminController.getAllProjects);
+
 module.exports = router;
