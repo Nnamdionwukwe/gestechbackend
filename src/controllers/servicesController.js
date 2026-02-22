@@ -427,11 +427,10 @@ exports.subscribeNewsletter = async (req, res) => {
     }
 
     await db.query(
-      `INSERT INTO newsletter_subscribers (id, email, full_name, is_active)
-       VALUES ($1, $2, $3, true)`,
-      [uuidv4(), email, name || null],
+      `INSERT INTO newsletter_subscribers (id, email, is_active)
+   VALUES ($1, $2, true)`,
+      [uuidv4(), email],
     );
-
     res.json({
       success: true,
       message: "Successfully subscribed to our newsletter!",
