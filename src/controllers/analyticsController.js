@@ -62,7 +62,7 @@ exports.getAnalytics = async (req, res) => {
                  WHEN referrer LIKE '%twitter%'  THEN 'twitter.com'
                  WHEN referrer LIKE '%instagram%'THEN 'instagram.com'
                  WHEN referrer LIKE '%linkedin%' THEN 'linkedin.com'
-                 ELSE regexp_replace(referrer, '^https?://([^/]+).*', '\1')
+                 ELSE regexp_replace(referrer, '^https?://([^/]+).*', '\\1')
                END,
                'Direct / None'
              ) AS referrer,
