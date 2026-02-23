@@ -13,7 +13,7 @@ class CartController {
 
     const cart = cartResult.rows[0];
 
-    const itemsResult = await client.qåuery(
+    const itemsResult = await client.query(
       `
       SELECT 
         ci.id, ci.quantity, ci.price, ci.item_type,
