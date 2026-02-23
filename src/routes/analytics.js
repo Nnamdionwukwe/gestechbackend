@@ -4,39 +4,13 @@ const router = express.Router();
 const analyticsController = require("../controllers/analyticsController");
 const { authenticate, authorize, optionalAuth } = require("../middleware/auth");
 
-/**
- * ANALYTICS ROUTES
- */
-
-// ==================== PUBLIC TRACKING ====================
-
-/**
- * @route   POST /api/analytics/track/pageview
- * @desc    Track page view
- * @access  Public
- * @body    { page_url, page_title, referrer }
- */
+// POST /api/analytics/track/pageview
 router.post("/track/pageview", optionalAuth, analyticsController.trackPageView);
 
-// GET /api/admin/analytics?days=30
-router.get("/", authenticateUser, isAdmin, getAnalytics);
-
-/**
- * @route   POST /api/analytics/track/event
- * @desc    Track custom event
- * @access  Public
- * @body    { event_name, event_category, event_label, event_value, metadata }
- */
+// POST /api/analytics/track/event
 router.post("/track/event", optionalAuth, analyticsController.trackEvent);
 
-// ==================== ADMIN ANALYTICS ====================
-
-/**
- * @route   GET /api/analytics/summary
- * @desc    Get analytics summary
- * @access  Private (Admin, Editor)
- * @query   start_date, end_date
- */
+// GET /api/analytics/summary
 router.get(
   "/summary",
   authenticate,
@@ -44,12 +18,7 @@ router.get(
   analyticsController.getAnalyticsSummary,
 );
 
-/**
- * @route   GET /api/analytics/page
- * @desc    Get page-specific analytics
- * @access  Private (Admin, Editor)
- * @query   page_url
- */
+// GET /api/analytics/page
 router.get(
   "/page",
   authenticate,
@@ -57,17 +26,20 @@ router.get(
   analyticsController.getPageAnalytics,
 );
 
-/**
- * @route   GET /api/analytics/events
- * @desc    Get event analytics
- * @access  Private (Admin, Editor)
- * @query   event_category, start_date, end_date
- */
+// GET /api/analytics/events
 router.get(
   "/events",
   authenticate,
   authorize("admin", "editor"),
   analyticsController.getEventAnalytics,
+);
+
+// GET /api/analytics/admin?days=30  ← admin dashboard endpoint lives HERE
+router.get(
+  "/admin",
+  authenticate,
+  authorize("admin"),
+  analyticsController.getAnalytics,
 );
 
 module.exports = router;
