@@ -13,7 +13,7 @@ class CartController {
 
     const cart = cartResult.rows[0];
 
-    const itemsResult = await client.query(
+    const itemsResult = await client.qåuery(
       `
       SELECT 
         ci.id, ci.quantity, ci.price, ci.item_type,
@@ -520,6 +520,220 @@ class CartController {
       client.release(); // ✅ Released AFTER response is built and sent
     }
   }
+
+  // ── ADD these 4 methods to CartController.js (inside the class, before the closing brace) ──
+
+  /**
+   * GET /api/cart/admin/all
+   * All carts with user info + item count
+   */
+  async getAllCarts(req, res) {
+    const client = await db.pool.connect();
+    try {
+      const { page = 1, limit = 20, search = "" } = req.query;
+      const offset = (page - 1) * limit;
+
+      const carts = await client.query(
+        `SELECT
+           c.id, c.subtotal, c.total, c.created_at, c.updated_at,
+           u.id AS user_id, u.full_name, u.email,
+           COUNT(ci.id) AS item_count
+         FROM carts c
+         LEFT JOIN users u ON c.user_id = u.id
+         LEFT JOIN cart_items ci ON ci.cart_id = c.id
+         ${search ? "WHERE u.email ILIKE $3 OR u.full_name ILIKE $3" : ""}
+         GROUP BY c.id, u.id, u.full_name, u.email
+         ORDER BY c.updated_at DESC
+         LIMIT $1 OFFSET $2`,
+        search ? [limit, offset, `%${search}%`] : [limit, offset],
+      );
+
+      const total = await client.query(
+        `SELECT COUNT(*) FROM carts c
+         LEFT JOIN users u ON c.user_id = u.id
+         ${search ? "WHERE u.email ILIKE $1 OR u.full_name ILIKE $1" : ""}`,
+        search ? [`%${search}%`] : [],
+      );
+
+      return res.json({
+        success: true,
+        data: carts.rows,
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total: parseInt(total.rows[0].count),
+          pages: Math.ceil(total.rows[0].count / limit),
+        },
+      });
+    } catch (error) {
+      console.error("Admin getAllCarts error:", error);
+      return res
+        .status(500)
+        .json({ success: false, error: "Failed to fetch carts" });
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * GET /api/cart/admin/user/:userId
+   * View a specific user's full cart
+   */
+  async getUserCartAdmin(req, res) {
+    const client = await db.pool.connect();
+    try {
+      const { userId } = req.params;
+
+      const cartResult = await client.query(
+        "SELECT * FROM carts WHERE user_id = $1",
+        [userId],
+      );
+
+      if (!cartResult.rows.length) {
+        return res
+          .status(404)
+          .json({ success: false, error: "No cart found for this user" });
+      }
+
+      const cartData = await this._buildCartResponse(
+        client,
+        cartResult.rows[0].id,
+      );
+
+      return res.json({ success: true, data: cartData });
+    } catch (error) {
+      console.error("Admin getUserCart error:", error);
+      return res
+        .status(500)
+        .json({ success: false, error: "Failed to fetch user cart" });
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * DELETE /api/cart/admin/user/:userId/clear
+   * Force-clear a user's cart
+   */
+  async clearUserCartAdmin(req, res) {
+    const client = await db.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const { userId } = req.params;
+
+      const cartResult = await client.query(
+        "SELECT * FROM carts WHERE user_id = $1",
+        [userId],
+      );
+
+      if (!cartResult.rows.length) {
+        await client.query("ROLLBACK");
+        return res
+          .status(404)
+          .json({ success: false, error: "No cart found for this user" });
+      }
+
+      const cartId = cartResult.rows[0].id;
+
+      await client.query("DELETE FROM cart_items WHERE cart_id = $1", [cartId]);
+      await client.query(
+        "UPDATE carts SET subtotal = 0, total = 0 WHERE id = $1",
+        [cartId],
+      );
+
+      await client.query("COMMIT");
+
+      return res.json({ success: true, message: "Cart cleared successfully" });
+    } catch (error) {
+      await client.query("ROLLBACK");
+      console.error("Admin clearUserCart error:", error);
+      return res
+        .status(500)
+        .json({ success: false, error: "Failed to clear cart" });
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * GET /api/cart/admin/stats
+   * Aggregate cart statistics
+   */
+  async getCartStats(req, res) {
+    const client = await db.pool.connect();
+    try {
+      const [overview, topProducts, abandoned] = await Promise.all([
+        // Overview counts
+        client.query(`
+          SELECT
+            COUNT(DISTINCT c.id)                                    AS total_carts,
+            COUNT(ci.id)                                            AS total_items,
+            ROUND(AVG(item_counts.cnt), 1)                         AS avg_items_per_cart,
+            ROUND(AVG(c.total)::numeric, 2)                        AS avg_cart_value,
+            SUM(c.total)                                            AS total_cart_value,
+            COUNT(DISTINCT CASE WHEN c.total = 0 THEN c.id END)    AS empty_carts,
+            COUNT(DISTINCT CASE
+              WHEN c.updated_at < NOW() - INTERVAL '7 days'
+               AND c.total > 0 THEN c.id END)                      AS abandoned_carts
+          FROM carts c
+          LEFT JOIN cart_items ci ON ci.cart_id = c.id
+          LEFT JOIN (
+            SELECT cart_id, COUNT(*) AS cnt FROM cart_items GROUP BY cart_id
+          ) item_counts ON item_counts.cart_id = c.id
+        `),
+
+        // Top 5 most carted products
+        client.query(`
+          SELECT
+            p.id, p.name,
+            COUNT(ci.id)      AS times_carted,
+            SUM(ci.quantity)  AS total_quantity
+          FROM cart_items ci
+          JOIN products p ON ci.product_id = p.id
+          WHERE ci.item_type = 'product'
+          GROUP BY p.id, p.name
+          ORDER BY times_carted DESC
+          LIMIT 5
+        `),
+
+        // Carts not updated in > 7 days with items still in them
+        client.query(`
+          SELECT
+            c.id, c.total, c.updated_at,
+            u.full_name, u.email,
+            COUNT(ci.id) AS item_count
+          FROM carts c
+          JOIN users u ON c.user_id = u.id
+          JOIN cart_items ci ON ci.cart_id = c.id
+          WHERE c.updated_at < NOW() - INTERVAL '7 days'
+            AND c.total > 0
+          GROUP BY c.id, u.full_name, u.email
+          ORDER BY c.updated_at ASC
+          LIMIT 10
+        `),
+      ]);
+
+      return res.json({
+        success: true,
+        data: {
+          overview: overview.rows[0],
+          topProducts: topProducts.rows,
+          abandonedCarts: abandoned.rows,
+        },
+      });
+    } catch (error) {
+      console.error("Admin getCartStats error:", error);
+      return res
+        .status(500)
+        .json({ success: false, error: "Failed to fetch cart stats" });
+    } finally {
+      client.release();
+    }
+  }
+
+  // ── Also fix this typo on line ~24 of CartController.js ───────────────────────
+  // FIND:    const itemsResult = await client.qåuery(
+  // REPLACE: const itemsResult = await client.query(
 }
 
 module.exports = new CartController();
