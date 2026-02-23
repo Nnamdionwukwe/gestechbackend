@@ -18,6 +18,9 @@ const { authenticate, authorize, optionalAuth } = require("../middleware/auth");
  */
 router.post("/track/pageview", optionalAuth, analyticsController.trackPageView);
 
+// GET /api/admin/analytics?days=30
+router.get("/", authenticateUser, isAdmin, getAnalytics);
+
 /**
  * @route   POST /api/analytics/track/event
  * @desc    Track custom event

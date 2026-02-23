@@ -121,6 +121,7 @@ const orderRoutes = require("./src/routes/orders");
 const paymentRoutes = require("./src/routes/payments");
 const payStackRoutes = require("./src/routes/Paystack");
 const contactRoutes = require("./src/routes/contact");
+const analyticsRoute = require("./routes/analytics");
 
 app.use("/api/agency", agencyRoutes);
 app.use("/api/auth", authRoutes);
@@ -133,6 +134,8 @@ app.use("/api/orders", orderRoutes);
 app.use("/api/payments", paymentRoutes);
 app.use("/api/paystack", payStackRoutes);
 app.use("/api/contact", contactRoutes);
+app.use("/api/admin/analytics", analyticsRoute);
+
 // ========================================
 // ERROR HANDLERS
 // ========================================
