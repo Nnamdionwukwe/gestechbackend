@@ -140,43 +140,33 @@ exports.getAnalytics = async (req, res) => {
 
 exports.trackPageView = async (req, res) => {
   try {
-    const { page_url, page_title, referrer, user_agent } = req.body;
+    const { page_url, referrer } = req.body;
+    if (!page_url) return res.status(400).json({ error: "page_url required" });
 
-    if (!page_url) {
-      return res.status(400).json({
-        success: false,
-        error: "Page URL is required",
-      });
-    }
+    const crypto = require("crypto");
+    const rawIp =
+      req.headers["x-forwarded-for"]?.split(",")[0]?.trim() ||
+      req.socket?.remoteAddress ||
+      "";
+    const ipHash = crypto.createHash("sha256").update(rawIp).digest("hex");
 
     await db.query(
-      `INSERT INTO page_views 
-       (id, page_url, page_title, referrer, user_agent, ip_address, user_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      `INSERT INTO page_views (id, path, ip_hash, user_agent, referrer, created_at)
+       VALUES (gen_random_uuid(), $1, $2, $3, $4, NOW())`,
       [
-        uuidv4(),
         page_url,
-        page_title || null,
-        referrer || null,
-        user_agent || req.headers["user-agent"],
-        req.ip || req.connection.remoteAddress,
-        req.user?.id || null,
+        ipHash,
+        req.headers["user-agent"] || null,
+        referrer || req.headers["referer"] || null,
       ],
     );
 
-    res.json({
-      success: true,
-      message: "Page view tracked",
-    });
+    res.json({ success: true });
   } catch (error) {
     console.error("Track page view error:", error);
-    res.status(500).json({
-      success: false,
-      error: "Failed to track page view",
-    });
+    res.status(500).json({ error: "Failed to track page view" });
   }
 };
-
 // ==================== TRACK EVENT ====================
 
 exports.trackEvent = async (req, res) => {
