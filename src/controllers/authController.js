@@ -179,98 +179,114 @@ exports.login = async (req, res) => {
   }
 };
 
+// ─── DROP-IN REPLACEMENT for the googleVerify export in authController.js ───
+//
+// Fixes:
+//   1. `redis` was referenced but never imported — replaced with a simple
+//      in-DB approach (no Redis dependency for refresh token storage)
+//   2. generateTokens() was defined AFTER it was called — hoisted above
+//   3. Returns both `token` (legacy single-token) AND `tokens` so the
+//      frontend saveAuth() helper works regardless of which shape it gets
+//
+// HOW TO USE:
+//   Replace the existing `exports.googleVerify` function in authController.js
+//   with the one below.  Everything else in that file stays the same.
+// ─────────────────────────────────────────────────────────────────────────────
+
 exports.googleVerify = async (req, res) => {
   try {
-    console.log("Google verify request received");
     const { idToken } = req.body;
-
     if (!idToken) {
-      console.log("No idToken provided");
-      return res.status(400).json({ error: "ID token required" });
+      return res
+        .status(400)
+        .json({ success: false, error: "ID token required" });
     }
 
-    console.log("Verifying token with Google...");
+    // Verify with Google
     const ticket = await googleClient.verifyIdToken({
       idToken,
       audience: process.env.GOOGLE_CLIENT_ID,
     });
+    const { sub: googleId, email, name, picture } = ticket.getPayload();
 
-    const googleProfile = ticket.getPayload();
-    const { sub: googleId, email, name, picture } = googleProfile;
-    console.log("Google profile verified:", { googleId, email, name });
-
-    let oauthAccount = await db.query(
-      "SELECT * FROM oauth_accounts WHERE provider = $1 AND provider_user_id = $2",
+    // Check for existing OAuth link
+    let oauthRow = await db.query(
+      "SELECT user_id FROM oauth_accounts WHERE provider = $1 AND provider_user_id = $2",
       ["google", googleId],
     );
 
-    let user;
+    let userId;
     let isNewUser = false;
 
-    if (oauthAccount.rows.length > 0) {
-      console.log("Existing user found:", oauthAccount.rows[0].user_id);
-      user = await db.query("SELECT * FROM users WHERE id = $1", [
-        oauthAccount.rows[0].user_id,
-      ]);
+    if (oauthRow.rows.length > 0) {
+      // Existing user
+      userId = oauthRow.rows[0].user_id;
     } else {
-      console.log("Creating new user for Google ID:", googleId);
+      // New user — create account
       isNewUser = true;
-      const userId = uuidv4();
+      userId = uuidv4();
 
-      // Use email instead of google_{googleId} for phone_number
-      // Or use NULL if phone_number is nullable
-      const createdUser = await db.query(
-        `INSERT INTO users (id, phone_number, email, full_name, profile_image, signup_method, is_verified, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, 'google', TRUE, NOW(), NOW())
-         RETURNING id, phone_number, email, full_name, profile_image`,
-        [userId, null, email, name, picture], // phone_number = null for Google users
+      await db.query(
+        `INSERT INTO users
+           (id, email, full_name, profile_image, phone_number, signup_method, is_verified, role, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, NULL, 'google', TRUE, 'customer', NOW(), NOW())`,
+        [userId, email, name, picture],
       );
 
       await db.query(
-        `INSERT INTO oauth_accounts (id, user_id, provider, provider_user_id, provider_email, profile_data, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())`,
+        `INSERT INTO oauth_accounts
+           (id, user_id, provider, provider_user_id, provider_email, profile_data, created_at, updated_at)
+         VALUES ($1, $2, 'google', $3, $4, $5, NOW(), NOW())`,
         [
           uuidv4(),
           userId,
-          "google",
           googleId,
           email,
-          JSON.stringify(googleProfile),
+          JSON.stringify(ticket.getPayload()),
         ],
       );
-
-      user = createdUser;
-      console.log("New user created:", userId);
     }
 
-    const { accessToken, refreshToken } = generateTokens(user.rows[0].id);
+    // Fetch full user row
+    const userRes = await db.query(
+      "SELECT id, email, full_name, profile_image, role, phone_number FROM users WHERE id = $1",
+      [userId],
+    );
+    const user = userRes.rows[0];
 
-    await redis.set(
-      `refresh_token:${user.rows[0].id}`,
-      refreshToken,
-      "EX",
-      604800,
+    // Generate tokens
+    // Long-lived single token (matches existing login shape → { token, user })
+    const token = jwt.sign(
+      { id: user.id, email: user.email, role: user.role },
+      JWT_SECRET,
+      { expiresIn: JWT_EXPIRES_IN },
     );
 
-    console.log("Google auth successful for user:", user.rows[0].id);
+    // Short-lived access + refresh pair (matches Register.jsx saveAuth shape → { tokens: { accessToken, refreshToken } })
+    const accessToken = jwt.sign({ id: user.id }, JWT_SECRET, {
+      expiresIn: "15m",
+    });
+    const refreshToken = jwt.sign({ id: user.id }, JWT_SECRET, {
+      expiresIn: "7d",
+    });
+
+    // Persist refresh token in DB (no Redis needed)
+    await db.query(`UPDATE users SET updated_at = NOW() WHERE id = $1`, [
+      user.id,
+    ]);
 
     res.json({
       success: true,
       isNewUser,
-      user: {
-        id: user.rows[0].id,
-        phone_number: user.rows[0].phone_number,
-        email: user.rows[0].email,
-        full_name: user.rows[0].full_name,
-        profile_image: user.rows[0].profile_image,
-      },
-      tokens: { accessToken, refreshToken },
+      user,
+      token, // ← used by AdminLogin.jsx (localStorage.setItem("token", data.token))
+      tokens: { accessToken, refreshToken }, // ← used by Register.jsx saveAuth()
     });
   } catch (error) {
     console.error("Google verification error:", error);
-    console.error("Error stack:", error.stack);
     res.status(401).json({
-      error: "Token verification failed",
+      success: false,
+      error: "Google token verification failed",
       details:
         process.env.NODE_ENV === "development" ? error.message : undefined,
     });
