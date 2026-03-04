@@ -166,6 +166,104 @@ exports.login = async (req, res) => {
   }
 };
 
+exports.googleVerify = async (req, res) => {
+  try {
+    console.log("Google verify request received");
+    const { idToken } = req.body;
+
+    if (!idToken) {
+      console.log("No idToken provided");
+      return res.status(400).json({ error: "ID token required" });
+    }
+
+    console.log("Verifying token with Google...");
+    const ticket = await googleClient.verifyIdToken({
+      idToken,
+      audience: process.env.GOOGLE_CLIENT_ID,
+    });
+
+    const googleProfile = ticket.getPayload();
+    const { sub: googleId, email, name, picture } = googleProfile;
+    console.log("Google profile verified:", { googleId, email, name });
+
+    let oauthAccount = await db.query(
+      "SELECT * FROM oauth_accounts WHERE provider = $1 AND provider_user_id = $2",
+      ["google", googleId],
+    );
+
+    let user;
+    let isNewUser = false;
+
+    if (oauthAccount.rows.length > 0) {
+      console.log("Existing user found:", oauthAccount.rows[0].user_id);
+      user = await db.query("SELECT * FROM users WHERE id = $1", [
+        oauthAccount.rows[0].user_id,
+      ]);
+    } else {
+      console.log("Creating new user for Google ID:", googleId);
+      isNewUser = true;
+      const userId = uuidv4();
+
+      // Use email instead of google_{googleId} for phone_number
+      // Or use NULL if phone_number is nullable
+      const createdUser = await db.query(
+        `INSERT INTO users (id, phone_number, email, full_name, profile_image, signup_method, is_verified, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, 'google', TRUE, NOW(), NOW())
+         RETURNING id, phone_number, email, full_name, profile_image`,
+        [userId, null, email, name, picture], // phone_number = null for Google users
+      );
+
+      await db.query(
+        `INSERT INTO oauth_accounts (id, user_id, provider, provider_user_id, provider_email, profile_data, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())`,
+        [
+          uuidv4(),
+          userId,
+          "google",
+          googleId,
+          email,
+          JSON.stringify(googleProfile),
+        ],
+      );
+
+      user = createdUser;
+      console.log("New user created:", userId);
+    }
+
+    const { accessToken, refreshToken } = generateTokens(user.rows[0].id);
+
+    await redis.set(
+      `refresh_token:${user.rows[0].id}`,
+      refreshToken,
+      "EX",
+      604800,
+    );
+
+    console.log("Google auth successful for user:", user.rows[0].id);
+
+    res.json({
+      success: true,
+      isNewUser,
+      user: {
+        id: user.rows[0].id,
+        phone_number: user.rows[0].phone_number,
+        email: user.rows[0].email,
+        full_name: user.rows[0].full_name,
+        profile_image: user.rows[0].profile_image,
+      },
+      tokens: { accessToken, refreshToken },
+    });
+  } catch (error) {
+    console.error("Google verification error:", error);
+    console.error("Error stack:", error.stack);
+    res.status(401).json({
+      error: "Token verification failed",
+      details:
+        process.env.NODE_ENV === "development" ? error.message : undefined,
+    });
+  }
+};
+
 // ==================== GET CURRENT USER ====================
 
 exports.getCurrentUser = async (req, res) => {
