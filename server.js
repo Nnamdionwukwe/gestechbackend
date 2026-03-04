@@ -22,8 +22,9 @@ app.use(
       const allowedOrigins = [
         "http://localhost:5173",
         "http://localhost:3000",
-        "http://localhost:5000",
+        "http://localhost:5001",
         "https://gestechbackend-production.up.railway.app",
+        "https://gestecom.vercel.app/",
       ];
 
       if (allowedOrigins.indexOf(origin) !== -1) {
