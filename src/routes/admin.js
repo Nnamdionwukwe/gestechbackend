@@ -11,7 +11,6 @@ router.use(authorize("admin", "editor"));
 router.get("/dashboard/stats", adminController.getDashboardStats);
 
 // ==================== SERVICES ====================
-// No getAllServices in controller yet — GET route omitted
 router.post("/services", adminController.createService);
 router.put("/services/:id", adminController.updateService);
 router.delete("/services/:id", adminController.deleteService);
@@ -23,7 +22,6 @@ router.put("/projects/:id", adminController.updateProject);
 router.delete("/projects/:id", adminController.deleteProject);
 
 // ==================== TESTIMONIALS ====================
-// No getAllTestimonials in controller yet — GET route omitted
 router.post("/testimonials", adminController.createTestimonial);
 router.put("/testimonials/:id", adminController.updateTestimonial);
 router.delete("/testimonials/:id", adminController.deleteTestimonial);
