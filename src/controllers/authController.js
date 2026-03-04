@@ -4,6 +4,19 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { v4: uuidv4 } = require("uuid");
 
+const { OAuth2Client } = require("google-auth-library");
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+
+function generateTokens(userId) {
+  const accessToken = jwt.sign({ id: userId }, JWT_SECRET, {
+    expiresIn: "15m",
+  });
+  const refreshToken = jwt.sign({ id: userId }, JWT_SECRET, {
+    expiresIn: "7d",
+  });
+  return { accessToken, refreshToken };
+}
+
 const JWT_SECRET =
   process.env.JWT_SECRET || "your-secret-key-change-in-production";
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "7d";
