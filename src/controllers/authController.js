@@ -28,12 +28,10 @@ exports.register = async (req, res) => {
     const { email, password, full_name, role } = req.body;
 
     if (!email || !password || !full_name) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          error: "Email, password, and full name are required",
-        });
+      return res.status(400).json({
+        success: false,
+        error: "Email, password, and full name are required",
+      });
     }
 
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
@@ -43,12 +41,10 @@ exports.register = async (req, res) => {
     }
 
     if (password.length < 8) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          error: "Password must be at least 8 characters long",
-        });
+      return res.status(400).json({
+        success: false,
+        error: "Password must be at least 8 characters long",
+      });
     }
 
     const existing = await db.query("SELECT id FROM users WHERE email = $1", [
@@ -79,23 +75,19 @@ exports.register = async (req, res) => {
       { expiresIn: JWT_EXPIRES_IN },
     );
 
-    res
-      .status(201)
-      .json({
-        success: true,
-        message: "User registered successfully",
-        token,
-        user: user.rows[0],
-      });
+    res.status(201).json({
+      success: true,
+      message: "User registered successfully",
+      token,
+      user: user.rows[0],
+    });
   } catch (error) {
     console.error("Register error:", error);
-    res
-      .status(500)
-      .json({
-        success: false,
-        error: "Failed to register user",
-        details: error.message,
-      });
+    res.status(500).json({
+      success: false,
+      error: "Failed to register user",
+      details: error.message,
+    });
   }
 };
 
@@ -144,13 +136,11 @@ exports.login = async (req, res) => {
     res.json({ success: true, message: "Login successful", token, user });
   } catch (error) {
     console.error("Login error:", error);
-    res
-      .status(500)
-      .json({
-        success: false,
-        error: "Failed to login",
-        details: error.message,
-      });
+    res.status(500).json({
+      success: false,
+      error: "Failed to login",
+      details: error.message,
+    });
   }
 };
 
@@ -187,8 +177,9 @@ exports.googleVerify = async (req, res) => {
 
       await db.query(
         `INSERT INTO users
-           (id, email, full_name, profile_image, phone_number, signup_method, is_verified, role, is_active, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, NULL, 'google', TRUE, 'user', TRUE, NOW(), NOW())`,
+     (id, email, full_name, profile_image, phone_number, password_hash,
+      signup_method, is_verified, role, is_active, created_at, updated_at)
+   VALUES ($1, $2, $3, $4, NULL, NULL, 'google', TRUE, 'user', TRUE, NOW(), NOW())`,
         [userId, email, name, picture],
       );
 
@@ -314,12 +305,10 @@ exports.changePassword = async (req, res) => {
         .json({ success: false, error: "Both passwords are required" });
     }
     if (new_password.length < 8) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          error: "New password must be at least 8 characters",
-        });
+      return res.status(400).json({
+        success: false,
+        error: "New password must be at least 8 characters",
+      });
     }
 
     const result = await db.query(
@@ -410,12 +399,10 @@ exports.resetPassword = async (req, res) => {
         .json({ success: false, error: "Token and new password are required" });
     }
     if (new_password.length < 8) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          error: "Password must be at least 8 characters",
-        });
+      return res.status(400).json({
+        success: false,
+        error: "Password must be at least 8 characters",
+      });
     }
 
     let decoded;
